@@ -90,7 +90,7 @@ CREATE TABLE bookings (
 
   hold_expires_at    timestamptz,           -- set while status = 'held'
   payment_claimed_at timestamptz,           -- customer says they paid (screenshot); pauses expiry
-  hold_warned_at     timestamptz,           -- owner alerted that the hold is about to expire
+  hold_nudged_at     timestamptz,           -- customer reminded that the hold is about to expire
   reminder_sent_at   timestamptz,
   review_asked_at    timestamptz,
   idempotency_key    text UNIQUE,           -- dedupes agent retries
@@ -140,11 +140,13 @@ his personal number (§3, Owner commands).
   verify, forwards it to the owner, and sets `payment_claimed_at`. A claimed
   hold **does not auto-expire**; it waits for the owner. A screenshot alone
   never confirms a booking.
-* Two hours before an unclaimed hold expires, the owner gets an alert
-  ("RP-1042 hold expires at 6pm, no payment recorded"). Open holds also
-  appear in the nightly digest.
-* `hold_hours` is **pending the owner** (placeholder 24). It is a single
-  `settings` value, so it can change without a code change.
+* **Hold duration is 1 hour** (owner's decision), stored as `hold_minutes=60`
+  in `settings`. When the hold is placed, the bot sends the payment details
+  (UPI ID / QR, see Q-J) and says the slot is held for 1 hour.
+* About 20 minutes before an unclaimed hold expires, the **customer** gets a
+  nudge ("Your slot is held until 4:15pm, share the payment screenshot once
+  done"). This is free because it falls inside their 24h window. The owner is
+  not pinged for every unpaid hold; expired holds appear in the nightly digest.
 
 **Booking transaction**
 1. `BEGIN`; sweep expired holds (`UPDATE … SET status='expired' WHERE status='held' AND hold_expires_at < now()`).
@@ -262,7 +264,7 @@ CREATE TABLE rates (
 );
 
 CREATE TABLE settings (key text PRIMARY KEY, value jsonb NOT NULL);
--- hold_hours=24 (placeholder, owner to confirm), hold_warn_before_min=120, setup_buffer_min=45, teardown_buffer_min=30, travel_buffer_min=60,
+-- hold_minutes=60, hold_nudge_before_min=20, setup_buffer_min=45, teardown_buffer_min=30, travel_buffer_min=60,
 -- birthday_default_hours=3, business_open='09:00', business_close='20:00',
 -- kids_per_setup=10 (TBD), advance_pct=50, min_lead_days=0
 ```
@@ -297,7 +299,8 @@ CREATE TABLE handoffs (
   booking_id   bigint REFERENCES bookings(id),
   reason       text NOT NULL CHECK (reason IN (
                  'sponsorship','human_requested','complaint','custom_quote',
-                 'out_of_area','unknown_area','cancellation_paid','damage','other')),
+                 'out_of_area','unknown_area','cancellation_paid','reschedule',
+                 'damage','other')),
   priority     text NOT NULL DEFAULT 'normal' CHECK (priority IN ('low','normal','urgent')),
   summary      text NOT NULL,         -- agent-written one-liner for the owner
   details      jsonb,                 -- sponsorship: event, date, venue, footfall, ask (free/paid)
@@ -332,7 +335,10 @@ All bodies are JSON, all routes need `x-api-key`, and errors look like
 | `POST /bookings` | agent `create_booking` | Creates a **held** booking (transaction + 23P01 retry). Header `Idempotency-Key` |
 | `GET /bookings?phone=&status=` | agent `find_bookings`, WF4 | Bookings for a phone |
 | `GET /bookings/:ref` | owner / agent | One booking |
-| `POST /bookings/:ref/cancel` | agent `cancel_booking` | `held` → cancelled now. `confirmed` → opens a `cancellation_paid` handoff (advance is non-refundable; the owner talks to them) |
+| `POST /bookings/:ref/cancel` | agent `cancel_booking` | `held` → cancelled now, owner gets a one-line note. `confirmed` → **not cancelled**; opens an urgent `cancellation_paid` handoff and the owner decides (§3.1) |
+| `POST /bookings/:ref/reschedule-request` | agent `request_reschedule` | Any booking, paid or not. Never moves anything. Returns the requested day's schedule + an API-computed feasibility verdict, opens a `reschedule` handoff, alerts the owner (§3.1) |
+| `POST /bookings/:ref/move` | owner command `MOVE` | Re-checks availability and moves the booking atomically (same EXCLUDE constraint, 23P01 retry) |
+| `GET /schedule?date=` | owner `TODAY`/`TOMORROW`, reschedule alert | All held/confirmed bookings that day with times, setups, area, and free units per time window |
 | `POST /bookings/:ref/payments` | owner command | Record payment; advance ⇒ `confirmed` |
 | `PATCH /bookings/:ref` | owner command | Status (`completed`, `no_show`), address, time overrides, ID/agreement flags |
 | **Handoffs** | | |
@@ -348,8 +354,44 @@ All bodies are JSON, all routes need `x-api-key`, and errors look like
 ### Agent tools (one HTTP Request Tool each)
 
 `get_rates`, `check_service_area`, `get_quote`, `check_availability`,
-`create_booking`, `find_bookings`, `cancel_booking`, `update_lead_profile`,
-`flag_for_human`.
+`create_booking`, `find_bookings`, `cancel_booking`, `request_reschedule`,
+`update_lead_profile`, `flag_for_human`.
+
+### 3.1 Cancellations and reschedules (decided: Q-2)
+
+| Customer asks to… | Unpaid (`held`) | Paid (`confirmed`) |
+|---|---|---|
+| **Cancel** | Bot cancels it itself; the unit is freed at once; owner gets a one-line note | Bot does **not** cancel. It replies kindly ("our team will call you shortly"), never argues refunds, and sends the owner an urgent alert. The owner decides and sends `CANCEL RP-…` if needed |
+| **Reschedule** | Escalated to the owner | Escalated to the owner |
+
+**Reschedule alert.** The bot never moves a booking itself. It collects the
+new date (and time, for birthdays) and calls `request_reschedule`. The **API**,
+not the LLM, works out the day's schedule and whether the move fits, applying
+the same buffers and unit count as a new booking. The owner receives:
+
+```
+🔁 Reschedule request: RP-1042
+Priya (98XXXXXXXX) · paid ₹9,000
+From: Sat 18 Oct, 3:30–6:30pm, 2 setups
+To:   Sun 26 Oct, 4:00–7:00pm, 2 setups
+
+Sun 26 Oct bookings:
+• RP-1051 11:00am–2:00pm · 1 setup · Andheri W
+• RP-1057 3:30–6:30pm · 3 setups · Vashi
+Free at 4:00pm: 2 of 6 units
+
+✅ Can be accommodated.
+Reply: MOVE RP-1042 2026-10-26 16:00
+```
+
+When the move does not fit, the last lines read "❌ Cannot be accommodated:
+only 1 unit free at 4:00pm" and list the nearest times that do fit that day.
+
+The customer is told only that the request has gone to the team; the bot never
+promises the new date. The new slot is **not** held while the owner decides,
+so `MOVE` re-checks at the moment he sends it. If it was taken in the meantime,
+he gets "❌ No longer free" plus alternatives. On success the customer is told
+the new date and time.
 
 Two deliberate differences from the brief:
 * **The agent does not log messages.** WF1 logs inbound and outbound messages
@@ -379,6 +421,7 @@ DONE RP-1042                      → status completed
 NOSHOW RP-1042                    → status no_show
 CANCEL RP-1042                    → cancel
 RESOLVE 17                        → resolve handoff 17, un-pause the bot for that lead
+MOVE RP-1042 2026-10-26 16:00     → move the booking (birthday: date + start time; rental: new start date)
 TODAY / TOMORROW                  → short schedule
 HELP (or anything unrecognised)   → list of commands
 ```
@@ -461,12 +504,12 @@ availability, bookings with the concurrency test, handoffs, jobs/digest) →
 
 Design calls (my recommendation first):
 
-* **Q-1 Held bookings: DECIDED.** Unpaid bot bookings are `held` and block
-  units. The owner confirms payment with `PAID` from his personal number and
-  gets a one-line reply. Only one owner number. *Hold duration: waiting on the
-  owner* (placeholder 24h, configurable).
-* **Q-2 Agent cancelling paid bookings.** Recommended: the agent cancels `held`
-  bookings itself and hands `confirmed` ones (advance already paid) to the owner.
+* **Q-1 Held bookings: DECIDED.** Unpaid bot bookings are `held` for **1
+  hour** and block units. The owner confirms payment with `PAID` from his
+  personal number and gets a one-line reply. Only one owner number.
+* **Q-2 Cancel / reschedule: DECIDED** (§3.1). The bot cancels unpaid
+  bookings itself. Paid cancellations and all reschedules go to the owner,
+  with the day's schedule and an accommodate yes/no.
 * **Q-3 Owner commands over WhatsApp: DECIDED** (§3).
 * **Q-4 LLM.** Recommended: Claude in the n8n AI Agent node (Anthropic
   credential).
@@ -491,5 +534,7 @@ Owner facts still open (from the brief, plus two new ones):
 * **Q-G** Real chat screenshots for tone.
 * **Q-H (new)** Kids-per-setup rule of thumb for "suggest number of setups"
   (placeholder: 10 kids/setup with 4 controllers, rotating).
+* **Q-J (new, needed for the 1h hold)** The UPI ID and/or QR image the bot
+  sends with every hold, so the parent can actually pay within the hour.
 * **Q-I (new)** Minimum notice: is same-day booking allowed by the bot, or
   should same-day requests always go to the owner?
