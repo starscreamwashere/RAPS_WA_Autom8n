@@ -119,8 +119,9 @@ CREATE TABLE booking_units (
 
 **Blocked period per unit**
 * *Birthday*: `[event_start − setup_buffer − travel_buffer, event_end + teardown_buffer + travel_buffer)`.
-  Defaults: setup 45 min, teardown 30 min, travel 60 min each way. All are
-  configurable in `settings`. A unit can then do a morning and an evening party
+  Defaults: setup 45 min, teardown 30 min, travel **90 min each way, same
+  for every area** (decided: Q-6, the owner tunes later). All are configurable
+  in `settings`. A 3:30–6:30pm party blocks its kit from 1:15pm to 8:30pm. A unit can then do a morning and an evening party
   only when the gap allows it.
 * *Rental*: `[rental_start_date 09:00, rental_end_date 20:00)` IST. Delivery and
   pickup happen inside business hours on those days.
@@ -264,7 +265,7 @@ CREATE TABLE rates (
 );
 
 CREATE TABLE settings (key text PRIMARY KEY, value jsonb NOT NULL);
--- hold_minutes=120, hold_nudge_before_min=30, setup_buffer_min=45, teardown_buffer_min=30, travel_buffer_min=60,
+-- hold_minutes=120, hold_nudge_before_min=30, setup_buffer_min=45, teardown_buffer_min=30, travel_buffer_min=90,
 -- birthday_default_hours=3, business_open='09:00', business_close='20:00',
 -- kids_per_setup=10 (TBD), min_lead_days=0,
 -- advance_pct_rental=10 (90% on delivery), advance_pct_birthday=50 (50% after install)
@@ -567,8 +568,9 @@ Design calls (my recommendation first):
   Flash model is picked from AI Studio's free-tier list at setup.
 * **Q-5 WhatsApp number: DECIDED** (§4.1). Coexistence; the bot stays silent
   for a customer after the owner types to them, until `RESUME`.
-* **Q-6 Travel buffer** of 60 min each side for birthdays. Is that realistic
-  across Mumbai ↔ Vasai, or should it vary by region?
+* **Q-6 Travel buffer: DECIDED.** 90 min each way for every area to start.
+  The owner tunes it later via `settings` (per-region values can be added if
+  needed).
 
 Owner facts still open (from the brief, plus two new ones):
 
