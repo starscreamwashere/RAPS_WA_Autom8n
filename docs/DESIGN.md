@@ -281,7 +281,7 @@ CREATE TABLE rates (
 CREATE TABLE settings (key text PRIMARY KEY, value jsonb NOT NULL);
 -- hold_minutes=120, hold_nudge_before_min=30, setup_buffer_min=45, teardown_buffer_min=30, travel_buffer_min=90,
 -- birthday_default_hours=3, business_open='09:00', business_close='20:00',
--- controllers_per_setup_max=4, controllers_total=(owner to confirm),
+-- controllers_per_setup_max=4, controllers_total=20,
 -- same_day_allowed=true (must fit inside business hours incl. buffers),
 -- advance_pct_rental=10 (90% on delivery), advance_pct_birthday=50 (50% after install)
 ```
@@ -611,10 +611,13 @@ Design calls (my recommendation first):
 
 Owner facts still open (from the brief, plus two new ones):
 
-* **Q-A** Rental pricing beyond ₹3,000/week (daily / multi-day tiers).
+* **Q-A** Rental rate card. The chats show 1 day ₹950, 3 days ₹1,999, 7 days
+  ₹2,749 (₹2,499 with story + Google review), plus extensions and a
+  per-controller difference. The owner must confirm the table (OWNER_FACTS.md).
 * **Q-B** Decoration price(s).
-* **Q-C** Controllers for a normal rental (1 vs 4), and the **total number of
-  controllers owned** (`controllers_total`).
+* **Q-C Controllers: DECIDED.** 20 in total. Normal rentals take 1 or 2
+  (price depends on it); birthday setups take 4. Facts gathered from the
+  owner's form and chat screenshots are in `docs/OWNER_FACTS.md`.
 * **Q-D** Birthday slot: is 3:30–6:00 fixed, or chosen per booking within
   9am–8pm?
 * **Q-E** Age restrictions.
