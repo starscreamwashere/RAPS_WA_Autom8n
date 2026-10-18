@@ -1,15 +1,14 @@
-// Placeholder entrypoint so `docker compose up` boots end to end.
-// Real routes land after the design in docs/DESIGN.md is confirmed.
-const express = require('express');
+const config = require('./config');
+const { createApp } = require('./app');
 
-const app = express();
-app.use(express.json());
+if (!config.apiKey) {
+  console.error('API_KEY is not set; refusing to start without auth.');
+  process.exit(1);
+}
+if (!config.ownerPhone) {
+  console.warn('OWNER_PHONE is not set; owner commands are disabled.');
+}
 
-app.get('/health', (req, res) => {
-  res.json({ ok: true, service: 'raps-powerplay-api' });
-});
-
-const port = Number(process.env.API_PORT) || 3000;
-app.listen(port, () => {
-  console.log(`raps-powerplay-api listening on :${port}`);
+createApp().listen(config.port, () => {
+  console.log(`raps-powerplay-api listening on :${config.port}`);
 });

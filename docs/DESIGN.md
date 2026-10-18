@@ -1,7 +1,7 @@
 # RAPS Powerplay WhatsApp Assistant: Design (v1 proposal)
 
-Status: **proposal, awaiting confirmation**. No implementation code until the
-decisions in §8 are confirmed.
+Status: **decisions confirmed; database + API implemented** (`db/migrations`,
+`api/`, 43 tests). Next: system prompt, WF1, Meta setup, WF2–WF4.
 
 ## 1. Shape of the system
 
@@ -318,8 +318,7 @@ missing cell, returns `needs_owner_confirmation: true` and the bot hands the
 lead over for a quote, until the owner gives a rule for in-between durations.
 
 The **API does all price arithmetic** (`POST /quotes`). The LLM never
-multiplies rupees. For rental durations that are not whole weeks, the quote
-returns `needs_owner_confirmation: true` until Q-A is answered.
+multiplies rupees. Rentals with more than one PS5 are also quoted by the owner.
 
 ### 2.7 Payments (recorded, not collected)
 
@@ -386,25 +385,35 @@ All bodies are JSON, all routes need `x-api-key`, and errors look like
 | `POST /bookings/:ref/cancel` | agent `cancel_booking` | `held` → cancelled now, owner gets a one-line note. `confirmed` → **not cancelled**; opens an urgent `cancellation_paid` handoff and the owner decides (§3.1) |
 | `POST /bookings/:ref/reschedule-request` | agent `request_reschedule` | Any booking, paid or not. Never moves anything. Returns the requested day's schedule + an API-computed feasibility verdict, opens a `reschedule` handoff, alerts the owner (§3.1) |
 | `POST /bookings/:ref/move` | owner command `MOVE` | Re-checks availability and moves the booking atomically (same EXCLUDE constraint, 23P01 retry) |
-| `GET /schedule?date=` | owner `TODAY`/`TOMORROW`, reschedule alert | All held/confirmed bookings that day with times, setups, area, and free units per time window |
+| `POST /bookings/:ref/decline-reschedule` | owner command `DECLINE` | Releases the held new slot; the booking stays put |
+| `POST /bookings/:ref/payment-claim` | agent `report_payment` | Customer says they paid (screenshot): pauses hold expiry, alerts the owner. Never confirms |
+| `GET /schedule?date=` | owner `TODAY`/`TOMORROW`, reschedule alert | All held/confirmed bookings that day |
 | `POST /bookings/:ref/payments` | owner command | Record payment; advance ⇒ `confirmed` |
 | `PATCH /bookings/:ref` | owner command | Status (`completed`, `no_show`), address, time overrides, ID/agreement flags |
 | **Handoffs** | | |
 | `POST /handoffs` | agent `flag_for_human` | Create handoff; optionally pause the bot for this lead |
 | `GET /handoffs?status=open` | WF4 | |
 | `POST /handoffs/:id/resolve` | owner command | Resolve the handoff |
+| `POST /owner/command` | WF1 (owner number only) | `{ phone, text }` → `{ reply, notifications[] }`. The API re-checks `OWNER_PHONE` |
 | `POST /leads/:phone/pause` / `POST /leads/:phone/resume` | WF1 (app echo) / owner `RESUME` | Owner takeover on/off for one customer |
 | **Jobs** | | |
 | `GET /jobs/reminders-due` | WF2 | Confirmed bookings starting within N hours with no `reminder_sent_at` |
 | `GET /jobs/reviews-due` | WF3 | Completed bookings from the last N hours with no `review_asked_at` |
 | `POST /jobs/mark` | WF2/WF3 | `{ booking_ref, field: 'reminder_sent_at' \| 'review_asked_at' }` |
+| `POST /jobs/sweep` | WF2 (every 15 min) | Expires lapsed holds; reports lapsed reschedule holds to the owner |
 | `GET /reports/digest?date=` | WF4 | Bookings made, events tomorrow, revenue received, no-shows, holds expiring, open handoffs, and a pre-flattened `text` (newlines → ` · `) for the template variable |
 
 ### Agent tools (one HTTP Request Tool each)
 
 `get_rates`, `check_service_area`, `get_quote`, `check_availability`,
 `create_booking`, `find_bookings`, `cancel_booking`, `request_reschedule`,
-`update_lead_profile`, `flag_for_human`.
+`report_payment`, `update_lead_profile`, `flag_for_human`.
+
+**Side effects as data.** Calls that should message someone return
+`notifications: [{ to: 'owner' | 'customer', phone?, text, template? }]`, and
+WF1 sends them as given. Agent tools also return `summary_for_customer`, the
+facts for the bot to relay in its own words. The workflows stay thin and all
+wording is tested in the API.
 
 ### 3.1 Cancellations and reschedules (decided: Q-2)
 
@@ -443,9 +452,9 @@ promises the new date.
 fits, `request_reschedule` places a tentative hold on it: a `held` booking with
 `reschedule_of = <original id>`. It blocks units like any hold, for
 `hold_minutes` (2h), and the owner is reminded 30 minutes before it lapses.
-* `MOVE RP-1042` → in one transaction, the tentative booking takes over the
-  original's status and payments, and the original is marked `moved`. The
-  customer is told the new date and time.
+* `MOVE RP-1042` → in one transaction the tentative hold is released and the
+  original booking is re-blocked on the new slot, keeping its ref, status and
+  payments. The customer is told the new date and time.
 * `DECLINE RP-1042` → the tentative hold is released and the original booking
   is untouched. The bot tells the customer the team will call them about
   other dates.
@@ -665,8 +674,9 @@ Owner facts still open (from the brief, plus two new ones):
   non-refundable on cancellation for both (existing policy, assumed unchanged).
 * **Q-J (new, needed for the hold)** The UPI ID and/or QR image the bot
   sends with every hold, so the parent can actually pay within the hour.
-* **Q-I Same-day: DECIDED.** Allowed when the whole job fits inside 9am–8pm:
-  travel + setup must be able to start no earlier than now, and teardown +
-  travel must end by 8pm.
+* **Q-I Same-day: DECIDED.** Allowed when the job fits the day. Birthday: the
+  on-site time (setup → party → teardown) must sit inside 9am–8pm, and the
+  team must be able to leave (start − setup − travel) after now. Rental: the
+  delivery (now + travel) must land before 8pm.
 * **Owner's personal number:** provided. It is set as `OWNER_PHONE` in the
   deployed `.env` only and kept out of git.
