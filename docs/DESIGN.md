@@ -564,8 +564,17 @@ Design calls (my recommendation first):
   production guarantees, and Google may use free-tier data to improve its
   products. Safeguard: if the model call fails (quota, outage), WF1 sends a
   fixed holding reply ("Thanks! Our team will get back to you shortly 🧡"),
-  logs it, and alerts the owner, so a lead is never left unanswered. The exact
-  Flash model is picked from AI Studio's free-tier list at setup.
+  logs it, and alerts the owner, so a lead is never left unanswered.
+  **Model selection is discovered, not hard-coded**: `scripts/gemini-models.mjs`
+  lists the models the key can see (`models.list`) and, with `--probe`, sends
+  each one a tiny text request and a function-calling request. `models.list`
+  does not say which models are free, so the probe is the only reliable check.
+  The passing models go into `LLM_MODELS` in fallback order, stable before
+  preview. Free quotas are per model, so the fallback order also stretches the
+  free capacity. WF1 tries them in order on quota (429), not-found (404) or 5xx
+  errors. A weekly WF4 check re-runs the probe and tells the owner/dev when a
+  listed model stops working. It never switches models silently, because a new
+  model must pass the §5.1 test set first.
 * **Q-5 WhatsApp number: DECIDED** (§4.1). Coexistence; the bot stays silent
   for a customer after the owner types to them, until `RESUME`.
 * **Q-6 Travel buffer: DECIDED.** 90 min each way for every area to start.
