@@ -267,7 +267,7 @@ CREATE TABLE settings (key text PRIMARY KEY, value jsonb NOT NULL);
 -- hold_minutes=120, hold_nudge_before_min=30, setup_buffer_min=45, teardown_buffer_min=30, travel_buffer_min=60,
 -- birthday_default_hours=3, business_open='09:00', business_close='20:00',
 -- kids_per_setup=10 (TBD), min_lead_days=0,
--- advance_pct_rental=10, advance_pct_birthday=50 (pending Q-K)
+-- advance_pct_rental=10 (90% on delivery), advance_pct_birthday=50 (50% after install)
 ```
 
 The **API does all price arithmetic** (`POST /quotes`). The LLM never
@@ -535,10 +535,9 @@ Owner facts still open (from the brief, plus two new ones):
 * **Q-G** Real chat screenshots for tone.
 * **Q-H (new)** Kids-per-setup rule of thumb for "suggest number of setups"
   (placeholder: 10 kids/setup with 4 controllers, rotating).
-* **Q-K (new) Advance amounts.** Normal rentals: 10% advance to book the
-  slot. Still to confirm: is the remaining 90% paid on delivery/after install?
-  Do birthdays stay at 50% advance + 50% after install? Advance % is stored
-  per booking kind in `settings`.
+* **Q-K Advance amounts: DECIDED.** Normal rental: 10% advance to book,
+  90% on delivery. Birthday: 50% advance, 50% after install. The advance is
+  non-refundable on cancellation for both (existing policy, assumed unchanged).
 * **Q-J (new, needed for the hold)** The UPI ID and/or QR image the bot
   sends with every hold, so the parent can actually pay within the hour.
 * **Q-I (new)** Minimum notice: is same-day booking allowed by the bot, or
