@@ -57,6 +57,8 @@ The brief's "₹3,000/week" does not match these chats.
   send this with every hold.
 
 ## Birthday events (from the form; no chat screenshots)
+**Status: not launched yet. The owner is starting it soon.** Normal rentals
+are the live business today, so the bot must handle them fully from day one.
 - ₹9,000 per setup: PS5 + 4 controllers, TV + stand, 3 hours, delivery,
   setup, teardown, on-site support. 50% advance, 50% after install.
 - Qualifying order: in service area? → date → number of players → setups

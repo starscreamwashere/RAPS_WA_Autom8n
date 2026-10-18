@@ -31,6 +31,21 @@ Customer WhatsApp ──► Meta Cloud API ──► ngrok (static domain) ─�
 * **Timezone**: all business logic runs in `Asia/Kolkata`. Columns are
   `timestamptz`; the API accepts and returns local ISO strings with `+05:30`.
 
+### 1.1 Launch priority
+
+**Normal rentals are the live business today; birthday events are launching
+soon.** Both flows are built, but a `settings` switch
+`birthday_bookings_enabled` controls the birthday side:
+* **off** (until the owner launches): the bot answers birthday questions
+  (package, inclusions, ₹9,000 per setup), collects date / area / players, and
+  hands the lead to the owner as a `custom_quote` handoff. It places no
+  automatic holds.
+* **on**: the full flow (setups, quote, availability, 2h hold, 50/50 terms).
+
+The owner flips it with an owner command (`BIRTHDAYS ON` / `BIRTHDAYS OFF`).
+Birthday timing values (setup 30–45 min, the ~3:30pm start) are estimates
+until the first events, and stay tunable in `settings`.
+
 ## 2. Data model
 
 ### 2.1 Inventory
