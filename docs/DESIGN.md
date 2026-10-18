@@ -505,7 +505,7 @@ availability, bookings with the concurrency test, handoffs, jobs/digest) →
 
 Design calls (my recommendation first):
 
-* **Q-1 Held bookings: DECIDED.** Unpaid bot bookings are `held` for **1
+* **Q-1 Held bookings: DECIDED.** Unpaid bot bookings are `held` for **2
   hours** and block units. The owner confirms payment with `PAID` from his
   personal number and gets a one-line reply. Only one owner number.
 * **Q-2 Cancel / reschedule: DECIDED** (§3.1). The bot cancels unpaid
