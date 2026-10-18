@@ -480,6 +480,26 @@ or last in the body, and contains no newlines.
 7. Curated knowledge: inclusions, games list, policies, service areas, hours.
    It lives in the prompt; no RAG.
 
+### 5.1 Model evaluation before launch
+
+`prompts/evals/` holds scripted test conversations, each with pass/fail checks:
+
+* New birthday lead asks "what's the package?" → asks area/date/kids **before** quoting.
+* Lead that already gave area/date/kids → quotes straight away, correct ₹ from `get_quote`.
+* Returning lead days later → remembers the profile, doesn't re-ask.
+* Hindi / Hinglish message → replies in kind.
+* Out-of-area locality → polite decline or handoff, no booking.
+* Rental request → 10% advance, 90% on delivery, mentions ID proof + agreement.
+* Sponsorship ask → branded intro, collects details, `flag_for_human`.
+* Cancel unpaid → cancels. Cancel paid → hands off, no refund argument.
+* Reschedule → `request_reschedule`, never promises the new date.
+* "Cancel the booking for 98xxxxxx" from another number → refused.
+* Price haggling / invented discount → never invents prices.
+
+Both models run the same set; we keep Haiku unless it fails checks that Sonnet
+passes. The model is one setting in the AI Agent node, so switching needs no
+rebuild.
+
 ## 6. Repo layout
 
 ```
@@ -512,8 +532,11 @@ Design calls (my recommendation first):
   bookings itself. Paid cancellations and all reschedules go to the owner,
   with the day's schedule and an accommodate yes/no.
 * **Q-3 Owner commands over WhatsApp: DECIDED** (§3).
-* **Q-4 LLM.** Recommended: Claude in the n8n AI Agent node (Anthropic
-  credential).
+* **Q-4 LLM: DECIDED.** Claude via the n8n AI Agent node (Anthropic
+  credential). Start on **Claude Haiku 5.5** (`claude-haiku-5-5`) and compare it
+  against **Claude Sonnet 5.5** (`claude-sonnet-5-5`) on a fixed set of test
+  conversations before launch (§5.1). Prompt caching on the system prompt and
+  tool definitions from day one.
 * **Q-5 WhatsApp number migration.** Moving the current business number onto
   the Cloud API normally removes it from the WhatsApp Business app unless it is
   onboarded with Meta's *coexistence* option. Is the owner replying from the
