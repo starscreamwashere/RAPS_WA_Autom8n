@@ -80,7 +80,7 @@ CREATE TABLE bookings (
 
   -- Money (quoted, not collected)
   price_total        int NOT NULL,          -- INR, whole rupees
-  advance_due        int NOT NULL,          -- 50% of total
+  advance_due        int NOT NULL,          -- total × advance_pct for this kind (see settings)
   decoration         boolean NOT NULL DEFAULT false,
   decoration_price   int,                   -- null until the owner prices it
 
@@ -126,7 +126,7 @@ CREATE TABLE booking_units (
   pickup happen inside business hours on those days.
 
 **Holds vs confirmed (decided: Q-1).** A booking only becomes confirmed after
-the 50% advance, which can take hours. If unpaid requests did not block units,
+the advance, which can take hours. If unpaid requests did not block units,
 two parents could both be told "you're booked" for the same slot. So a
 bot-created booking starts as `held`, which **also blocks** units, and expires
 after `hold_hours`. Expired holds are swept to `expired` at the start of every
@@ -140,10 +140,10 @@ his personal number (§3, Owner commands).
   verify, forwards it to the owner, and sets `payment_claimed_at`. A claimed
   hold **does not auto-expire**; it waits for the owner. A screenshot alone
   never confirms a booking.
-* **Hold duration is 1 hour** (owner's decision), stored as `hold_minutes=60`
+* **Hold duration is 2 hours** (owner's decision), stored as `hold_minutes=120`
   in `settings`. When the hold is placed, the bot sends the payment details
-  (UPI ID / QR, see Q-J) and says the slot is held for 1 hour.
-* About 20 minutes before an unclaimed hold expires, the **customer** gets a
+  (UPI ID / QR, see Q-J) and says the slot is held for 2 hours.
+* About 30 minutes before an unclaimed hold expires, the **customer** gets a
   nudge ("Your slot is held until 4:15pm, share the payment screenshot once
   done"). This is free because it falls inside their 24h window. The owner is
   not pinged for every unpaid hold; expired holds appear in the nightly digest.
@@ -264,9 +264,10 @@ CREATE TABLE rates (
 );
 
 CREATE TABLE settings (key text PRIMARY KEY, value jsonb NOT NULL);
--- hold_minutes=60, hold_nudge_before_min=20, setup_buffer_min=45, teardown_buffer_min=30, travel_buffer_min=60,
+-- hold_minutes=120, hold_nudge_before_min=30, setup_buffer_min=45, teardown_buffer_min=30, travel_buffer_min=60,
 -- birthday_default_hours=3, business_open='09:00', business_close='20:00',
--- kids_per_setup=10 (TBD), advance_pct=50, min_lead_days=0
+-- kids_per_setup=10 (TBD), min_lead_days=0,
+-- advance_pct_rental=10, advance_pct_birthday=50 (pending Q-K)
 ```
 
 The **API does all price arithmetic** (`POST /quotes`). The LLM never
@@ -505,7 +506,7 @@ availability, bookings with the concurrency test, handoffs, jobs/digest) →
 Design calls (my recommendation first):
 
 * **Q-1 Held bookings: DECIDED.** Unpaid bot bookings are `held` for **1
-  hour** and block units. The owner confirms payment with `PAID` from his
+  hours** and block units. The owner confirms payment with `PAID` from his
   personal number and gets a one-line reply. Only one owner number.
 * **Q-2 Cancel / reschedule: DECIDED** (§3.1). The bot cancels unpaid
   bookings itself. Paid cancellations and all reschedules go to the owner,
@@ -534,7 +535,11 @@ Owner facts still open (from the brief, plus two new ones):
 * **Q-G** Real chat screenshots for tone.
 * **Q-H (new)** Kids-per-setup rule of thumb for "suggest number of setups"
   (placeholder: 10 kids/setup with 4 controllers, rotating).
-* **Q-J (new, needed for the 1h hold)** The UPI ID and/or QR image the bot
+* **Q-K (new) Advance amounts.** Normal rentals: 10% advance to book the
+  slot. Still to confirm: is the remaining 90% paid on delivery/after install?
+  Do birthdays stay at 50% advance + 50% after install? Advance % is stored
+  per booking kind in `settings`.
+* **Q-J (new, needed for the hold)** The UPI ID and/or QR image the bot
   sends with every hold, so the parent can actually pay within the hour.
 * **Q-I (new)** Minimum notice: is same-day booking allowed by the bot, or
   should same-day requests always go to the owner?
