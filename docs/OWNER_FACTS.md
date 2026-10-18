@@ -22,18 +22,24 @@ the owner directly, so they need a yes from him before the bot uses them.
 - Customers log in with the RAPS account and must always play from the given
   user (the owner sends "steps after login" on delivery; this stays manual).
 
-## Normal rental pricing seen in chats (**CONFIRM**: a rate card is needed)
-| Duration | Price quoted | Notes |
-|---|---|---|
-| 1 day, 1 controller | ₹950 | |
-| 2 days | ₹1,620? | a payment of ₹1,620 appears after a 2-day order; unclear whether it was the full amount |
-| 3 days | ₹1,999 | "3 days will be 1999/-" |
-| 7 days, 1 controller | ₹2,749 | "1 week is my best selling" |
-| 7 days with review offer | ₹2,499 | ₹250 off for an Instagram story + a Google review |
-| Extension | ~₹250–375/day | +1 day quoted at ₹250; +4 days at ₹1,500 |
-| 2nd controller | ? | price changes with controller count; amount not shown |
+## Normal rental rate card (from the owner, 18 Oct 2026)
+| Controllers | 1 day | 1 week | 1 month |
+|---|---|---|---|
+| 1 | ₹950 | ₹2,750 | ₹9,000 |
+| 2 | ₹1,200 | ₹2,999 | ? |
+| 3 | ₹1,400 | ₹3,399 | ? |
+| 4 | ₹1,600 or ₹1,700? | ₹3,799 | ? |
 
-The brief's "₹3,000/week" does not match these chats.
+Still open (**CONFIRM**):
+- 4 controllers for 1 day: ₹1,600 or ₹1,700?
+- Is the ₹9,000 month for 1 controller, and what does a month cost with 2–4?
+- Durations between the packages (2–6 days, 8–29 days). The chats show 3 days
+  = ₹1,999 and extensions at ~₹250–375/day, but there is no rule yet.
+- Review offer: is ₹250 off (story + Google review) still offered?
+
+Until these are answered, the bot quotes only the exact 1-day / 1-week /
+1-month prices above. For any other duration it collects the details and
+hands the lead to the owner for a quote.
 
 ## Normal rental: booking process today
 1. Customer gives duration, number of controllers, date and area.

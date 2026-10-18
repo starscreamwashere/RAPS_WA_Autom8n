@@ -285,12 +285,23 @@ owner can correct it.
 
 ```sql
 CREATE TABLE rates (
-  code        text PRIMARY KEY,       -- 'birthday_station' | 'rental_week' | 'decoration'
+  code        text PRIMARY KEY,       -- 'birthday_station' | 'decoration'
   label       text NOT NULL,
   amount      int,                    -- INR; NULL = "price on request" (decoration today)
-  unit        text NOT NULL,          -- 'per_setup' | 'per_week' | 'per_event'
+  unit        text NOT NULL,          -- 'per_setup' | 'per_event'
   includes    text[] NOT NULL DEFAULT '{}',
   active      boolean NOT NULL DEFAULT true
+);
+
+-- Normal rental rate card: one row per (package, controller count).
+-- Seed (docs/OWNER_FACTS.md): day 950/1200/1400/1600-1700?, week 2750/2999/3399/3799,
+-- month 9000 (1 controller; others TBD).
+CREATE TABLE rental_rates (
+  package      text NOT NULL CHECK (package IN ('day','week','month')),
+  days         int  NOT NULL,          -- 1 / 7 / 30
+  controllers  int  NOT NULL CHECK (controllers BETWEEN 1 AND 4),
+  amount       int  NOT NULL,          -- INR
+  PRIMARY KEY (package, controllers)
 );
 
 CREATE TABLE settings (key text PRIMARY KEY, value jsonb NOT NULL);
@@ -300,6 +311,11 @@ CREATE TABLE settings (key text PRIMARY KEY, value jsonb NOT NULL);
 -- same_day_allowed=true (must fit inside business hours incl. buffers),
 -- advance_pct_rental=10 (90% on delivery), advance_pct_birthday=50 (50% after install)
 ```
+
+**Rental quoting:** an exact 1-day / 7-day / 30-day request for a known
+controller count is quoted from `rental_rates`. Any other duration, or a
+missing cell, returns `needs_owner_confirmation: true` and the bot hands the
+lead over for a quote, until the owner gives a rule for in-between durations.
 
 The **API does all price arithmetic** (`POST /quotes`). The LLM never
 multiplies rupees. For rental durations that are not whole weeks, the quote
