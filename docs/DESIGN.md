@@ -45,8 +45,20 @@ CREATE TABLE units (
 );
 ```
 
-For v1 a **unit means a full kit**: PS5, TV, TV stand, cables, stands, and
-controllers. Controllers and TVs are not tracked separately (§8, Q-C).
+For v1 a **unit means a full kit**: PS5, TV, TV stand, cables, and stands.
+TVs are not tracked separately.
+
+**Setups and controllers (decided: Q-H).** One PS5 takes up to **4
+controllers**, so `suggested_setups = ceil(players / 4)` (4 people → 1 PS5 +
+4 controllers; 10 people → 3 setups). Each booking stores `controllers`.
+If the request needs more consoles than are free, or more controllers than
+the `controllers_total` stock, the bot does **not** quote. It tells the parent
+the team will work out the best setup with them and opens a `custom_quote`
+handoff with the numbers; the owner agrees "n controllers and m consoles"
+directly with them. Controllers are a pooled stock, so the booking
+transaction also checks that controllers in overlapping held/confirmed
+bookings + this booking ≤ `controllers_total`. That check runs under a
+transaction-level advisory lock, because an EXCLUDE constraint cannot sum.
 
 ### 2.2 Bookings
 
@@ -62,8 +74,10 @@ CREATE TABLE bookings (
   kind               text NOT NULL CHECK (kind IN ('birthday','rental')),
   status             text NOT NULL DEFAULT 'held'
                      CHECK (status IN ('held','confirmed','completed',
-                                       'cancelled','expired','no_show')),
+                                       'cancelled','expired','no_show','moved')),
+  reschedule_of      bigint REFERENCES bookings(id),  -- tentative hold for a reschedule request
   setups             int  NOT NULL CHECK (setups BETWEEN 1 AND 6),
+  controllers        int  NOT NULL CHECK (controllers >= setups),  -- ≤ 4 per setup
 
   -- What the customer sees
   event_start        timestamptz,   -- birthday only: gaming starts
@@ -267,7 +281,8 @@ CREATE TABLE rates (
 CREATE TABLE settings (key text PRIMARY KEY, value jsonb NOT NULL);
 -- hold_minutes=120, hold_nudge_before_min=30, setup_buffer_min=45, teardown_buffer_min=30, travel_buffer_min=90,
 -- birthday_default_hours=3, business_open='09:00', business_close='20:00',
--- kids_per_setup=10 (TBD), min_lead_days=0,
+-- controllers_per_setup_max=4, controllers_total=(owner to confirm),
+-- same_day_allowed=true (must fit inside business hours incl. buffers),
 -- advance_pct_rental=10 (90% on delivery), advance_pct_birthday=50 (50% after install)
 ```
 
@@ -384,17 +399,28 @@ Sun 26 Oct bookings:
 Free at 4:00pm: 2 of 6 units
 
 ✅ Can be accommodated.
-Reply: MOVE RP-1042 2026-10-26 16:00
+Reply: MOVE RP-1042 (or DECLINE RP-1042). New slot held for 2h.
 ```
 
 When the move does not fit, the last lines read "❌ Cannot be accommodated:
 only 1 unit free at 4:00pm" and list the nearest times that do fit that day.
 
 The customer is told only that the request has gone to the team; the bot never
-promises the new date. The new slot is **not** held while the owner decides,
-so `MOVE` re-checks at the moment he sends it. If it was taken in the meantime,
-he gets "❌ No longer free" plus alternatives. On success the customer is told
-the new date and time.
+promises the new date.
+
+**The requested new slot is held while the owner decides (decided).** If it
+fits, `request_reschedule` places a tentative hold on it: a `held` booking with
+`reschedule_of = <original id>`. It blocks units like any hold, for
+`hold_minutes` (2h), and the owner is reminded 30 minutes before it lapses.
+* `MOVE RP-1042` → in one transaction, the tentative booking takes over the
+  original's status and payments, and the original is marked `moved`. The
+  customer is told the new date and time.
+* `DECLINE RP-1042` → the tentative hold is released and the original booking
+  is untouched. The bot tells the customer the team will call them about
+  other dates.
+* If the hold lapses with no answer, it is released and the owner is told.
+* If the requested slot does not fit, nothing is held; the alert shows the
+  nearest times that do fit.
 
 Two deliberate differences from the brief:
 * **The agent does not log messages.** WF1 logs inbound and outbound messages
@@ -426,7 +452,9 @@ CANCEL RP-1042                    → cancel
 RESOLVE 17                        → resolve handoff 17
 RESUME 98XXXXXXXX                 → bot takes over that customer's chat again (also: RESUME RP-1042)
 PAUSED                            → list customers the bot is currently silent for
-MOVE RP-1042 2026-10-26 16:00     → move the booking (birthday: date + start time; rental: new start date)
+MOVE RP-1042                      → accept the held reschedule
+MOVE RP-1042 2026-10-26 16:00     → move to a different date/time the owner agreed by phone
+DECLINE RP-1042                   → reject the reschedule, release the held new slot
 TODAY / TOMORROW                  → short schedule
 HELP (or anything unrecognised)   → list of commands
 ```
@@ -585,20 +613,26 @@ Owner facts still open (from the brief, plus two new ones):
 
 * **Q-A** Rental pricing beyond ₹3,000/week (daily / multi-day tiers).
 * **Q-B** Decoration price(s).
-* **Q-C** Controllers for a normal rental (1 vs 4), and whether TVs and
-  controllers ever run short independently of consoles.
+* **Q-C** Controllers for a normal rental (1 vs 4), and the **total number of
+  controllers owned** (`controllers_total`).
 * **Q-D** Birthday slot: is 3:30–6:00 fixed, or chosen per booking within
   9am–8pm?
 * **Q-E** Age restrictions.
-* **Q-F** Ads, hooks, and per-ad openers (the Meta referral payload lets us
-  tailor the first reply).
+* **Q-F** Ads: not required for the bot to work. Click-to-WhatsApp ads send a
+  `referral` (ad id, headline, body) with the first message, which is stored on
+  the lead automatically (`leads.ad_ref`) for intent and for "leads/bookings
+  per ad" in the digest. What we do need: **any offer or price an ad
+  promises**, so the bot honours it instead of contradicting it.
 * **Q-G** Real chat screenshots for tone.
-* **Q-H (new)** Kids-per-setup rule of thumb for "suggest number of setups"
-  (placeholder: 10 kids/setup with 4 controllers, rotating).
+* **Q-H Setups: DECIDED.** ceil(players / 4); anything beyond free consoles or
+  controller stock → owner handles it as a custom quote.
 * **Q-K Advance amounts: DECIDED.** Normal rental: 10% advance to book,
   90% on delivery. Birthday: 50% advance, 50% after install. The advance is
   non-refundable on cancellation for both (existing policy, assumed unchanged).
 * **Q-J (new, needed for the hold)** The UPI ID and/or QR image the bot
   sends with every hold, so the parent can actually pay within the hour.
-* **Q-I (new)** Minimum notice: is same-day booking allowed by the bot, or
-  should same-day requests always go to the owner?
+* **Q-I Same-day: DECIDED.** Allowed when the whole job fits inside 9am–8pm:
+  travel + setup must be able to start no earlier than now, and teardown +
+  travel must end by 8pm.
+* **Owner's personal number:** provided. It is set as `OWNER_PHONE` in the
+  deployed `.env` only and kept out of git.
