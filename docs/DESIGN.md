@@ -89,6 +89,8 @@ CREATE TABLE bookings (
   agreement_signed   boolean NOT NULL DEFAULT false,
 
   hold_expires_at    timestamptz,           -- set while status = 'held'
+  payment_claimed_at timestamptz,           -- customer says they paid (screenshot); pauses expiry
+  hold_warned_at     timestamptz,           -- owner alerted that the hold is about to expire
   reminder_sent_at   timestamptz,
   review_asked_at    timestamptz,
   idempotency_key    text UNIQUE,           -- dedupes agent retries
@@ -123,15 +125,26 @@ CREATE TABLE booking_units (
 * *Rental*: `[rental_start_date 09:00, rental_end_date 20:00)` IST. Delivery and
   pickup happen inside business hours on those days.
 
-**Holds vs confirmed (change from the brief, see Q-1).** The brief puts
-`WHERE status='confirmed'` on the constraint. A booking only becomes confirmed
-after the 50% advance, which can take hours. If unpaid requests do not block
-units, two parents can both be told "you're booked" for the same slot. I
-propose a `held` status that **also blocks** units and expires after
-`hold_hours` (default 24). Expired holds are swept to `expired` at the start of
-every availability check and booking transaction, so a stale hold never blocks
-a real customer. The owner marks a booking `confirmed` when the advance
-arrives.
+**Holds vs confirmed (decided: Q-1).** A booking only becomes confirmed after
+the 50% advance, which can take hours. If unpaid requests did not block units,
+two parents could both be told "you're booked" for the same slot. So a
+bot-created booking starts as `held`, which **also blocks** units, and expires
+after `hold_hours`. Expired holds are swept to `expired` at the start of every
+availability check and booking transaction, so a stale hold never blocks a real
+customer.
+
+*How payment becomes known:* the bot cannot see the owner's UPI or bank
+account. The owner confirms each payment himself with a `PAID` command from
+his personal number (§3, Owner commands).
+* If a customer sends a payment screenshot, the bot replies that the team will
+  verify, forwards it to the owner, and sets `payment_claimed_at`. A claimed
+  hold **does not auto-expire**; it waits for the owner. A screenshot alone
+  never confirms a booking.
+* Two hours before an unclaimed hold expires, the owner gets an alert
+  ("RP-1042 hold expires at 6pm, no payment recorded"). Open holds also
+  appear in the nightly digest.
+* `hold_hours` is **pending the owner** (placeholder 24). It is a single
+  `settings` value, so it can change without a code change.
 
 **Booking transaction**
 1. `BEGIN`; sweep expired holds (`UPDATE … SET status='expired' WHERE status='held' AND hold_expires_at < now()`).
@@ -249,7 +262,7 @@ CREATE TABLE rates (
 );
 
 CREATE TABLE settings (key text PRIMARY KEY, value jsonb NOT NULL);
--- hold_hours=24, setup_buffer_min=45, teardown_buffer_min=30, travel_buffer_min=60,
+-- hold_hours=24 (placeholder, owner to confirm), hold_warn_before_min=120, setup_buffer_min=45, teardown_buffer_min=30, travel_buffer_min=60,
 -- birthday_default_hours=3, business_open='09:00', business_close='20:00',
 -- kids_per_setup=10 (TBD), advance_pct=50, min_lead_days=0
 ```
@@ -349,16 +362,40 @@ Two deliberate differences from the brief:
 
 ### Owner commands (no dashboard)
 
-Messages from `OWNER_PHONE` skip the agent and go to a deterministic parser:
+The bot runs on the business number (`BUSINESS_PHONE`, 9082201911). The owner
+saves that number on his **personal** phone and chats with it like a customer
+would. Every webhook carries the sender's number (`from`), verified by
+WhatsApp, so it cannot be spoofed. WF1's first step is a single check:
+
+* `from == OWNER_PHONE` → **owner mode**: no AI, no lead record, no sales
+  reply. A strict, case-insensitive parser runs the command against the API.
+* anything else → customer mode (the AI Agent flow).
+
+Exactly one owner number in v1 (`OWNER_PHONE`, his personal number).
 
 ```
-PAID RP-1042 4500 upi     → POST /bookings/RP-1042/payments (advance if first)
-DONE RP-1042              → status completed
-NOSHOW RP-1042            → status no_show
-CANCEL RP-1042            → cancel
-RESOLVE 17                → resolve handoff 17
-TODAY / TOMORROW          → short schedule
+PAID RP-1042 4500 [upi|cash|bank] → record payment; the first one counts as the advance ⇒ confirmed
+DONE RP-1042                      → status completed
+NOSHOW RP-1042                    → status no_show
+CANCEL RP-1042                    → cancel
+RESOLVE 17                        → resolve handoff 17, un-pause the bot for that lead
+TODAY / TOMORROW                  → short schedule
+HELP (or anything unrecognised)   → list of commands
 ```
+
+Every owner command gets a **one-line confirmation** reply, and mistakes get a
+one-line error. The reply is free because it falls inside the owner's 24h
+window.
+
+```
+PAID RP-1042 9000   → ✅ RP-1042 confirmed (Priya, Sat 18 Oct, 2 setups). Priya notified.
+PAID RP-1024 9000   → ❌ No booking RP-1024. Did you mean RP-1042 (Priya)?
+DONE RP-1042        → ✅ RP-1042 marked completed. Review request will go out.
+```
+
+When a `PAID` confirms a booking, the customer gets a separate confirmation
+message (free-form if inside their 24h window, otherwise the
+`booking_confirmed` template).
 
 ## 4. Workflows
 
@@ -374,7 +411,7 @@ TODAY / TOMORROW          → short schedule
 * **WF4 owner digest** (21:00 IST): `GET /reports/digest` → template
   `owner_digest` with the flattened text as a single mid-body variable.
 
-Templates to submit for Meta approval: `booking_reminder`, `review_request`,
+Templates to submit for Meta approval: `booking_confirmed`, `booking_reminder`, `review_request`,
 `owner_digest`, `owner_alert` (urgent handoff), and optionally `lead_followup`
 (re-engage a quoted lead after 24h). Each variable is used once, never first
 or last in the body, and contains no newlines.
@@ -424,13 +461,13 @@ availability, bookings with the concurrency test, handoffs, jobs/digest) →
 
 Design calls (my recommendation first):
 
-* **Q-1 Held bookings block units.** Recommended: a bot-created booking is
-  `held` for 24h and blocks units; the owner's `PAID` command confirms it. The
-  alternative is the brief's confirmed-only constraint, which risks telling two
-  parents the same slot is booked.
+* **Q-1 Held bookings: DECIDED.** Unpaid bot bookings are `held` and block
+  units. The owner confirms payment with `PAID` from his personal number and
+  gets a one-line reply. Only one owner number. *Hold duration: waiting on the
+  owner* (placeholder 24h, configurable).
 * **Q-2 Agent cancelling paid bookings.** Recommended: the agent cancels `held`
   bookings itself and hands `confirmed` ones (advance already paid) to the owner.
-* **Q-3 Owner commands over WhatsApp** as the v1 admin UI (§3). OK?
+* **Q-3 Owner commands over WhatsApp: DECIDED** (§3).
 * **Q-4 LLM.** Recommended: Claude in the n8n AI Agent node (Anthropic
   credential).
 * **Q-5 WhatsApp number migration.** Moving the current business number onto
