@@ -12,7 +12,7 @@ Customer WhatsApp ──► Meta Cloud API ──► ngrok (static domain) ─�
                      ▼
    WF1: verify signature → POST /messages (log + dedupe + upsert lead)
         → GET /leads/:phone (structured profile)
-        → AI Agent (Claude) with Postgres chat memory keyed by phone
+        → AI Agent (Gemini; Claude later) with Postgres chat memory keyed by phone
              tools ──HTTP──► RAPS API  (never SQL)
         → send reply via Cloud API → POST /messages (log outbound)
 
@@ -196,7 +196,7 @@ CREATE TABLE leads (
   notes              text,
 
   needs_human        boolean NOT NULL DEFAULT false,
-  bot_paused_until   timestamptz,             -- owner takeover: WF1 logs but doesn't reply
+  bot_paused_at      timestamptz,             -- owner typed from the app: WF1 logs but doesn't reply until RESUME
   opted_out          boolean NOT NULL DEFAULT false,
   last_inbound_at    timestamptz,             -- drives the 24h service-window check
   last_outbound_at   timestamptz,
@@ -345,7 +345,8 @@ All bodies are JSON, all routes need `x-api-key`, and errors look like
 | **Handoffs** | | |
 | `POST /handoffs` | agent `flag_for_human` | Create handoff; optionally pause the bot for this lead |
 | `GET /handoffs?status=open` | WF4 | |
-| `POST /handoffs/:id/resolve` | owner command | Resolve and un-pause the bot |
+| `POST /handoffs/:id/resolve` | owner command | Resolve the handoff |
+| `POST /leads/:phone/pause` / `POST /leads/:phone/resume` | WF1 (app echo) / owner `RESUME` | Owner takeover on/off for one customer |
 | **Jobs** | | |
 | `GET /jobs/reminders-due` | WF2 | Confirmed bookings starting within N hours with no `reminder_sent_at` |
 | `GET /jobs/reviews-due` | WF3 | Completed bookings from the last N hours with no `review_asked_at` |
@@ -421,7 +422,9 @@ PAID RP-1042 4500 [upi|cash|bank] → record payment; the first one counts as th
 DONE RP-1042                      → status completed
 NOSHOW RP-1042                    → status no_show
 CANCEL RP-1042                    → cancel
-RESOLVE 17                        → resolve handoff 17, un-pause the bot for that lead
+RESOLVE 17                        → resolve handoff 17
+RESUME 98XXXXXXXX                 → bot takes over that customer's chat again (also: RESUME RP-1042)
+PAUSED                            → list customers the bot is currently silent for
 MOVE RP-1042 2026-10-26 16:00     → move the booking (birthday: date + start time; rental: new start date)
 TODAY / TOMORROW                  → short schedule
 HELP (or anything unrecognised)   → list of commands
@@ -445,7 +448,8 @@ message (free-form if inside their 24h window, otherwise the
 
 * **WF1 inbound**: Webhook (GET returns `hub.challenge` after checking
   `hub.verify_token`; POST checks `X-Hub-Signature-256`) → ignore status
-  callbacks → owner? → command parser : (`POST /messages` → duplicate/opted-out/paused?
+  callbacks → **app echo** (owner typed to a customer from the Business app)?
+  → log it, `POST /leads/:phone/pause`, stop (§4.1) → owner? → command parser : (`POST /messages` → duplicate/opted-out/paused?
   stop → `GET /leads/:phone` → AI Agent [system prompt + profile JSON + Postgres
   memory keyed by phone, last ~30 turns] → send text → `POST /messages` out).
 * **WF2 reminders** (hourly): `reminders-due` → template `booking_reminder`
@@ -459,6 +463,27 @@ Templates to submit for Meta approval: `booking_confirmed`, `booking_reminder`, 
 `owner_digest`, `owner_alert` (urgent handoff), and optionally `lead_followup`
 (re-engage a quoted lead after 24h). Each variable is used once, never first
 or last in the body, and contains no newlines.
+
+### 4.1 Coexistence and owner takeover (decided: Q-5)
+
+The business number 9082201911 is onboarded to the Cloud API with Meta's
+**coexistence** option, so it keeps working in the owner's WhatsApp Business
+app alongside the bot. Meta sends a webhook echo for every message the owner
+types from the app.
+
+* When the owner types to a customer from the app, the bot **pauses for that
+  customer** (`leads.bot_paused_at`) and stays silent **until the owner sends
+  `RESUME <phone | booking ref>`** from his personal number. There is no
+  timeout.
+* Inbound messages from a paused customer are still logged, and profile facts
+  still update, but the bot sends no reply.
+* On first pause, the owner's personal number gets one line: "🤫 Bot paused for
+  Priya (98XXXXXXXX). Send RESUME 98XXXXXXXX to hand back."
+* The nightly digest lists every paused chat, so none is forgotten.
+* Reminders (WF2) and review asks (WF3) for a paused customer still go out.
+  They are templates about a booking, not conversation.
+* The exact coexistence limits (features disabled in the app, history sync)
+  are checked against Meta's current docs during setup.
 
 ## 5. Agent behaviour (prompt outline, `prompts/system.md`)
 
@@ -496,9 +521,9 @@ or last in the body, and contains no newlines.
 * "Cancel the booking for 98xxxxxx" from another number → refused.
 * Price haggling / invented discount → never invents prices.
 
-Both models run the same set; we keep Haiku unless it fails checks that Sonnet
-passes. The model is one setting in the AI Agent node, so switching needs no
-rebuild.
+The same set is used to accept the launch model (Gemini Flash) and, later, to
+compare it against Claude Haiku 5.5 / Sonnet 5.5. The model is one setting in
+the AI Agent node, so switching needs no rebuild.
 
 ## 6. Repo layout
 
@@ -532,15 +557,16 @@ Design calls (my recommendation first):
   bookings itself. Paid cancellations and all reschedules go to the owner,
   with the day's schedule and an accommodate yes/no.
 * **Q-3 Owner commands over WhatsApp: DECIDED** (§3).
-* **Q-4 LLM: DECIDED.** Claude via the n8n AI Agent node (Anthropic
-  credential). Start on **Claude Haiku 5.5** (`claude-haiku-5-5`) and compare it
-  against **Claude Sonnet 5.5** (`claude-sonnet-5-5`) on a fixed set of test
-  conversations before launch (§5.1). Prompt caching on the system prompt and
-  tool definitions from day one.
-* **Q-5 WhatsApp number migration.** Moving the current business number onto
-  the Cloud API normally removes it from the WhatsApp Business app unless it is
-  onboarded with Meta's *coexistence* option. Is the owner replying from the
-  app today, and should we use coexistence or a fresh number?
+* **Q-4 LLM: DECIDED.** **Google Gemini (Flash, free tier via Google AI
+  Studio) for launch.** Claude (Haiku 5.5 → Sonnet 5.5) is added when lead
+  volume grows. Known free-tier trade-offs, accepted: daily rate limits, no
+  production guarantees, and Google may use free-tier data to improve its
+  products. Safeguard: if the model call fails (quota, outage), WF1 sends a
+  fixed holding reply ("Thanks! Our team will get back to you shortly 🧡"),
+  logs it, and alerts the owner, so a lead is never left unanswered. The exact
+  Flash model is picked from AI Studio's free-tier list at setup.
+* **Q-5 WhatsApp number: DECIDED** (§4.1). Coexistence; the bot stays silent
+  for a customer after the owner types to them, until `RESUME`.
 * **Q-6 Travel buffer** of 60 min each side for birthdays. Is that realistic
   across Mumbai ↔ Vasai, or should it vary by region?
 
