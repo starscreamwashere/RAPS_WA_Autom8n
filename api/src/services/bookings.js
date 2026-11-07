@@ -346,7 +346,7 @@ async function recordPayment(ref, { amount, method, kind }) {
       reply = `✅ ${b.ref} confirmed (${who(b)}, ${bookingWhen(b)}, ${bookingWhat(b)}). ${rupees(amount)} received${short}. Customer notified.`;
       const balanceWhen = b.kind === 'birthday' ? 'after the setup is installed' : 'on delivery';
       notifications.push({
-        to: 'customer', phone: b.phone, template: 'booking_confirmed',
+        to: 'customer', phone: b.phone,
         text: `🎉 Your advance of ${rupees(amount)} is received and booking ${b.ref} is confirmed for ${bookingWhen(b)}. Balance ${rupees(balance)} is payable ${balanceWhen}. See you soon! 🎮`,
       });
     } else {
