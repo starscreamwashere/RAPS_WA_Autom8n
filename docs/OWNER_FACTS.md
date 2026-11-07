@@ -22,24 +22,22 @@ the owner directly, so they need a yes from him before the bot uses them.
 - Customers log in with the RAPS account and must always play from the given
   user (the owner sends "steps after login" on delivery; this stays manual).
 
-## Normal rental rate card (from the owner, 18 Oct 2026)
+## Normal rental rate card (confirmed by the owner, 18 Oct 2026)
 | Controllers | 1 day | 1 week | 1 month |
 |---|---|---|---|
 | 1 | ₹950 | ₹2,750 | ₹9,000 |
-| 2 | ₹1,200 | ₹2,999 | ? |
-| 3 | ₹1,400 | ₹3,399 | ? |
-| 4 | ₹1,600 or ₹1,700? | ₹3,799 | ? |
+| 2 | ₹1,200 | ₹2,999 | ₹9,000 |
+| 3 | ₹1,400 | ₹3,399 | ₹9,000 |
+| 4 | ₹1,600 | ₹3,799 | ₹9,000 |
+
+The month is ₹9,000 whatever the controller count.
 
 Still open (**CONFIRM**):
-- 4 controllers for 1 day: ₹1,600 or ₹1,700?
-- Is the ₹9,000 month for 1 controller, and what does a month cost with 2–4?
 - Durations between the packages (2–6 days, 8–29 days). The chats show 3 days
-  = ₹1,999 and extensions at ~₹250–375/day, but there is no rule yet.
-- Review offer: is ₹250 off (story + Google review) still offered?
-
-Until these are answered, the bot quotes only the exact 1-day / 1-week /
-1-month prices above. For any other duration it collects the details and
-hands the lead to the owner for a quote.
+  = ₹1,999 and extensions at ~₹250–375/day, but there is no rule yet. Until
+  there is, the bot hands these to the owner for a quote.
+- Review offer: is ₹250 off (story + Google review) still offered? Until
+  confirmed, the bot does not offer it.
 
 ## Normal rental: booking process today
 1. Customer gives duration, number of controllers, date and area.

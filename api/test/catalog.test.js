@@ -88,3 +88,11 @@ test('rates endpoint exposes terms the bot must repeat', async () => {
   assert.equal(r.rental.advance_pct, 10);
   assert.equal(r.security_deposit, 'none');
 });
+
+test('empty strings from tool calls count as absent', async () => {
+  const q = await api.post('/quotes', { kind: 'rental', days: 7, controllers: 2, players: '', setups: null, decoration: '' });
+  assert.equal(q.status, 200);
+  assert.equal(q.body.total, 2999);
+  const a = await api.get('/availability?kind=rental&start_date=2026-11-10&days=7&controllers=1&date=&start_time=&players=');
+  assert.equal(a.status, 200);
+});

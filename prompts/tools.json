@@ -1,0 +1,510 @@
+{
+  "_about": "Tools the AI agent can call. Each maps to one RAPS API request. `parameters` is what the model fills in; `context` values (the customer's phone, the WhatsApp message id) are added by the workflow and never come from the model. Used to build WF1's HTTP Request Tools and by scripts/run-evals.mjs.",
+  "tools": [
+    {
+      "name": "get_rates",
+      "description": "Current prices and terms: rental rate card (1 day / 1 week / 1 month by number of controllers), birthday package, advance %, what is included, the UPI ID, the rental ID form link, policies. Call before answering any price or terms question you have not already looked up in this conversation.",
+      "http": {
+        "method": "GET",
+        "path": "/rates"
+      },
+      "parameters": {
+        "type": "object",
+        "properties": {}
+      }
+    },
+    {
+      "name": "check_service_area",
+      "description": "Check whether an area, locality or 6-digit pincode is in our delivery area. Returns in_area true (we deliver), false (outside our area) or null (unknown: tell the customer you will confirm with the team). Not needed after update_lead_profile with an area, which checks it automatically.",
+      "http": {
+        "method": "GET",
+        "path": "/service-areas/check",
+        "query": [
+          "q"
+        ]
+      },
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "q": {
+            "type": "string",
+            "description": "Area, locality, address or pincode exactly as the customer wrote it"
+          }
+        },
+        "required": [
+          "q"
+        ]
+      }
+    },
+    {
+      "name": "get_quote",
+      "description": "Exact price for a rental or a birthday party: total, advance, balance and when it is due. For a birthday give players (it suggests setups, 4 players per setup) or setups. For a rental give days (1, 7 or 30) and controllers. If quotable is false or needs_owner_confirmation is true, do not state a price; the team will quote.",
+      "http": {
+        "method": "POST",
+        "path": "/quotes",
+        "body": [
+          "kind",
+          "players",
+          "setups",
+          "decoration",
+          "days",
+          "controllers"
+        ]
+      },
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "rental",
+              "birthday"
+            ]
+          },
+          "players": {
+            "type": "integer",
+            "description": "Birthday: number of kids/players"
+          },
+          "setups": {
+            "type": "integer",
+            "description": "Birthday: number of setups if the customer asked for a specific number"
+          },
+          "decoration": {
+            "type": "boolean",
+            "description": "Birthday: customer wants decoration"
+          },
+          "days": {
+            "type": "integer",
+            "description": "Rental: length in days (1, 7 or 30 are on the rate card)"
+          },
+          "controllers": {
+            "type": "integer",
+            "description": "Rental: controllers wanted, 1 to 4"
+          }
+        },
+        "required": [
+          "kind"
+        ]
+      }
+    },
+    {
+      "name": "check_availability",
+      "description": "Check if a PS5 (and controllers) is free. Birthday: date, start_time and players or setups. Rental: start_date, days and controllers. If not available it returns nearby alternatives to offer.",
+      "http": {
+        "method": "GET",
+        "path": "/availability",
+        "query": [
+          "kind",
+          "date",
+          "start_time",
+          "players",
+          "setups",
+          "start_date",
+          "days",
+          "controllers"
+        ]
+      },
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "rental",
+              "birthday"
+            ]
+          },
+          "date": {
+            "type": "string",
+            "description": "Birthday date, YYYY-MM-DD"
+          },
+          "start_time": {
+            "type": "string",
+            "description": "Birthday gaming start time, HH:MM 24h"
+          },
+          "players": {
+            "type": "integer"
+          },
+          "setups": {
+            "type": "integer"
+          },
+          "start_date": {
+            "type": "string",
+            "description": "Rental delivery date, YYYY-MM-DD"
+          },
+          "days": {
+            "type": "integer",
+            "description": "Rental length in days"
+          },
+          "controllers": {
+            "type": "integer",
+            "description": "Rental controllers, 1 to 4"
+          }
+        },
+        "required": [
+          "kind"
+        ]
+      }
+    },
+    {
+      "name": "create_booking",
+      "description": "Hold a slot for this customer after they agreed to the price and dates. Creates an unpaid HOLD (not a confirmed booking) and returns the booking number and summary_for_customer with the advance, UPI ID and hold time to relay. Birthday needs date, start_time and players or setups; rental needs start_date, days and controllers.",
+      "http": {
+        "method": "POST",
+        "path": "/bookings",
+        "body": [
+          "kind",
+          "date",
+          "start_time",
+          "players",
+          "setups",
+          "decoration",
+          "start_date",
+          "days",
+          "controllers",
+          "name",
+          "area",
+          "address",
+          "notes"
+        ],
+        "headers": {
+          "Idempotency-Key": "{{context.message_id}}"
+        }
+      },
+      "context": {
+        "phone": "body"
+      },
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "rental",
+              "birthday"
+            ]
+          },
+          "date": {
+            "type": "string",
+            "description": "Birthday date, YYYY-MM-DD"
+          },
+          "start_time": {
+            "type": "string",
+            "description": "Birthday start time, HH:MM 24h"
+          },
+          "players": {
+            "type": "integer"
+          },
+          "setups": {
+            "type": "integer"
+          },
+          "decoration": {
+            "type": "boolean"
+          },
+          "start_date": {
+            "type": "string",
+            "description": "Rental delivery date, YYYY-MM-DD"
+          },
+          "days": {
+            "type": "integer"
+          },
+          "controllers": {
+            "type": "integer"
+          },
+          "name": {
+            "type": "string",
+            "description": "Customer's name"
+          },
+          "area": {
+            "type": "string"
+          },
+          "address": {
+            "type": "string",
+            "description": "Delivery or venue address if given"
+          },
+          "notes": {
+            "type": "string",
+            "description": "Anything the team should know"
+          }
+        },
+        "required": [
+          "kind"
+        ]
+      }
+    },
+    {
+      "name": "find_bookings",
+      "description": "This customer's bookings (all statuses), newest first. Use when they ask about a booking that is not in the profile's active_bookings.",
+      "http": {
+        "method": "GET",
+        "path": "/bookings",
+        "query": [
+          "status"
+        ]
+      },
+      "context": {
+        "phone": "query"
+      },
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "held",
+              "confirmed",
+              "completed",
+              "cancelled",
+              "expired",
+              "no_show"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "cancel_booking",
+      "description": "Cancel one of this customer's bookings. An unpaid hold is cancelled at once. A paid booking is NOT cancelled: it goes to the team, who will call the customer.",
+      "http": {
+        "method": "POST",
+        "path": "/bookings/{ref}/cancel"
+      },
+      "context": {
+        "phone": "body"
+      },
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "ref": {
+            "type": "string",
+            "description": "Booking number, e.g. RP-1042"
+          }
+        },
+        "required": [
+          "ref"
+        ]
+      }
+    },
+    {
+      "name": "request_reschedule",
+      "description": "Ask the team to move one of this customer's bookings. Birthday: new date (and start_time if it changes). Rental: new start_date. The team decides; never promise the new date.",
+      "http": {
+        "method": "POST",
+        "path": "/bookings/{ref}/reschedule-request",
+        "body": [
+          "date",
+          "start_time",
+          "start_date"
+        ]
+      },
+      "context": {
+        "phone": "body"
+      },
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "ref": {
+            "type": "string",
+            "description": "Booking number, e.g. RP-1042"
+          },
+          "date": {
+            "type": "string",
+            "description": "Birthday: new date, YYYY-MM-DD"
+          },
+          "start_time": {
+            "type": "string",
+            "description": "Birthday: new start time, HH:MM"
+          },
+          "start_date": {
+            "type": "string",
+            "description": "Rental: new delivery date, YYYY-MM-DD"
+          }
+        },
+        "required": [
+          "ref"
+        ]
+      }
+    },
+    {
+      "name": "report_payment",
+      "description": "The customer says they paid the advance or sent a payment screenshot. Tells the team to verify and keeps the hold from expiring meanwhile. It does NOT confirm the booking.",
+      "http": {
+        "method": "POST",
+        "path": "/bookings/{ref}/payment-claim",
+        "body": [
+          "amount",
+          "note"
+        ]
+      },
+      "context": {
+        "phone": "body"
+      },
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "ref": {
+            "type": "string",
+            "description": "Booking number of the held booking"
+          },
+          "amount": {
+            "type": "integer",
+            "description": "Amount they say they paid, in rupees, if mentioned"
+          },
+          "note": {
+            "type": "string",
+            "description": "e.g. 'sent screenshot', 'paid by GPay'"
+          }
+        },
+        "required": [
+          "ref"
+        ]
+      }
+    },
+    {
+      "name": "update_lead_profile",
+      "description": "Save what you learned about this customer, before replying. Only include fields you learned. Setting area also checks the service area. Returns the updated profile with missing_for_quote and missing_for_booking.",
+      "http": {
+        "method": "PATCH",
+        "path": "/leads/{phone}",
+        "body_from": "fields"
+      },
+      "context": {
+        "phone": "path"
+      },
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "fields": {
+            "type": "object",
+            "description": "Only the fields you learned",
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "language": {
+                "type": "string",
+                "enum": [
+                  "en",
+                  "hi",
+                  "hinglish"
+                ]
+              },
+              "intent": {
+                "type": "string",
+                "enum": [
+                  "birthday",
+                  "rental",
+                  "general",
+                  "sponsorship"
+                ]
+              },
+              "area": {
+                "type": "string",
+                "description": "Area / locality / pincode as given"
+              },
+              "event_date": {
+                "type": "string",
+                "description": "Birthday date, YYYY-MM-DD"
+              },
+              "preferred_start": {
+                "type": "string",
+                "description": "Birthday start time, HH:MM"
+              },
+              "num_kids": {
+                "type": "integer"
+              },
+              "num_guests": {
+                "type": "integer"
+              },
+              "child_age": {
+                "type": "integer"
+              },
+              "venue_type": {
+                "type": "string",
+                "description": "home, society clubhouse, banquet, other"
+              },
+              "decoration_wanted": {
+                "type": "boolean"
+              },
+              "rental_start_date": {
+                "type": "string",
+                "description": "YYYY-MM-DD"
+              },
+              "rental_days": {
+                "type": "integer"
+              },
+              "controllers_wanted": {
+                "type": "integer"
+              },
+              "games_interest": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "notes": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "required": [
+          "fields"
+        ]
+      }
+    },
+    {
+      "name": "flag_for_human",
+      "description": "Hand something to the owner/team: custom quotes, unknown areas, sponsorship requests, complaints, damage, questions you cannot answer, or a customer who wants a person. The owner is alerted. Tell the customer the team will get back to them.",
+      "http": {
+        "method": "POST",
+        "path": "/handoffs",
+        "body": [
+          "reason",
+          "priority",
+          "summary",
+          "booking_ref"
+        ]
+      },
+      "context": {
+        "phone": "body"
+      },
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "reason": {
+            "type": "string",
+            "enum": [
+              "sponsorship",
+              "human_requested",
+              "complaint",
+              "custom_quote",
+              "unknown_area",
+              "damage",
+              "other"
+            ]
+          },
+          "priority": {
+            "type": "string",
+            "enum": [
+              "low",
+              "normal",
+              "urgent"
+            ]
+          },
+          "summary": {
+            "type": "string",
+            "description": "One or two lines for the owner: who, what they want, key details (dates, area, numbers; for sponsorship: event, date, venue, footfall, ask)"
+          },
+          "booking_ref": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "reason",
+          "summary"
+        ]
+      }
+    }
+  ]
+}

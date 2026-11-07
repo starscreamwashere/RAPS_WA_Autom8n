@@ -5,3 +5,4 @@ node_modules/
 coverage/
 # local volumes
 data/
+evals-report.json

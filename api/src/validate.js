@@ -1,5 +1,12 @@
 const { z } = require('zod');
 
+// Tool calls from n8n can send unset optional fields as "" or null; treat
+// those as absent so optional fields stay optional.
+function clean(obj) {
+  if (!obj || typeof obj !== 'object' || Array.isArray(obj)) return obj;
+  return Object.fromEntries(Object.entries(obj).filter(([, val]) => val !== '' && val !== null && val !== undefined));
+}
+
 const date = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'use YYYY-MM-DD');
 const time = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, 'use HH:MM (24h)');
 const phone = z.string().min(10).max(15);
@@ -113,6 +120,6 @@ const bookingPatch = z.object({
 const paymentClaim = z.object({ phone, amount: int(1, 10000000).optional(), note: z.string().max(500).optional() });
 
 module.exports = {
-  z, date, messageIn, leadPatch, bookingRequest, quoteRequest, createBooking, reschedule, handoff, payment,
+  z, clean, date, messageIn, leadPatch, bookingRequest, quoteRequest, createBooking, reschedule, handoff, payment,
   bookingPatch, paymentClaim, phone,
 };

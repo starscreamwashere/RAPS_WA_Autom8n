@@ -36,7 +36,7 @@ router.get('/leads/:phone', async (req, res) => {
 });
 
 router.patch('/leads/:phone', async (req, res) => {
-  res.json(await leads.updateProfile(req.params.phone, v.leadPatch.parse(req.body)));
+  res.json(await leads.updateProfile(req.params.phone, v.leadPatch.parse(v.clean(req.body))));
 });
 
 router.post('/leads/:phone/pause', async (req, res) => {
@@ -89,23 +89,23 @@ router.get('/service-areas/check', async (req, res) => {
 });
 
 router.post('/quotes', async (req, res) => {
-  res.json(quote(v.quoteRequest.parse(req.body), await loadCatalog()));
+  res.json(quote(v.quoteRequest.parse(v.clean(req.body)), await loadCatalog()));
 });
 
 // ---- Availability and bookings ---------------------------------------------
 router.get('/availability', async (req, res) => {
-  res.json(await bookings.checkAvailability(v.bookingRequest.parse(req.query)));
+  res.json(await bookings.checkAvailability(v.bookingRequest.parse(v.clean({ ...req.query }))));
 });
 
 router.post('/bookings', async (req, res) => {
-  const body = v.createBooking.parse({ ...req.body, idempotency_key: req.get('Idempotency-Key') ?? req.body.idempotency_key });
+  const body = v.createBooking.parse(v.clean({ ...req.body, idempotency_key: req.get('Idempotency-Key') ?? req.body.idempotency_key }));
   const r = await bookings.createBooking(body);
   res.status(r.created ? 201 : 200).json(r);
 });
 
 router.get('/bookings', async (req, res) => {
   const phone = v.phone.parse(req.query.phone);
-  res.json(await bookings.findBookings(phone, req.query.status));
+  res.json(await bookings.findBookings(phone, req.query.status || undefined));
 });
 
 router.get('/bookings/:ref', async (req, res) => {
@@ -118,11 +118,11 @@ router.post('/bookings/:ref/cancel', async (req, res) => {
 });
 
 router.post('/bookings/:ref/payment-claim', async (req, res) => {
-  res.json(await queued(await bookings.claimPayment(req.params.ref, v.paymentClaim.parse(req.body))));
+  res.json(await queued(await bookings.claimPayment(req.params.ref, v.paymentClaim.parse(v.clean(req.body)))));
 });
 
 router.post('/bookings/:ref/reschedule-request', async (req, res) => {
-  res.json(await queued(await bookings.requestReschedule(req.params.ref, v.reschedule.parse(req.body))));
+  res.json(await queued(await bookings.requestReschedule(req.params.ref, v.reschedule.parse(v.clean(req.body)))));
 });
 
 router.post('/bookings/:ref/move', async (req, res) => {
@@ -148,7 +148,7 @@ router.get('/schedule', async (req, res) => {
 
 // ---- Handoffs ----------------------------------------------------------------
 router.post('/handoffs', async (req, res) => {
-  res.status(201).json(await queued(await handoffs.flagForHuman(v.handoff.parse(req.body))));
+  res.status(201).json(await queued(await handoffs.flagForHuman(v.handoff.parse(v.clean(req.body)))));
 });
 
 router.get('/handoffs', async (req, res) => {

@@ -7,7 +7,8 @@ The assistant auto-replies to ad leads, qualifies them, quotes prices from the
 API, checks availability across 6 PS5 kits, places booking holds, and hands
 sponsorship requests and edge cases to the owner.
 
-**Status:** database + REST API built and tested. Design: [`docs/DESIGN.md`](docs/DESIGN.md);
+**Status:** database + REST API built and tested; bot prompt, tools and test
+conversations written (`prompts/`). Design: [`docs/DESIGN.md`](docs/DESIGN.md);
 business facts: [`docs/OWNER_FACTS.md`](docs/OWNER_FACTS.md).
 
 ## Stack
@@ -43,3 +44,19 @@ TEST_DATABASE_URL=postgres://user:pass@localhost:5432/raps_test npm test
 These cover pricing, service areas, holds and expiry, the parallel
 double-booking race, the shared controller stock, cancellations, reschedules,
 owner commands, reminder jobs and the digest.
+
+## Bot prompt and test conversations
+
+- `prompts/system.md`: the AI agent's instructions. WF1 fills in `{{NOW_IST}}`
+  and `{{LEAD_PROFILE}}` on every message.
+- `prompts/tools.json`: the agent's tools and the API request each one makes.
+- `prompts/evals/cases.json`: scripted conversations with pass/fail checks.
+
+Run the test conversations against a throwaway database and a real model:
+
+```bash
+# API running on a fresh database, then:
+RAPS_API_URL=http://localhost:3000 RAPS_API_KEY=... OWNER_PHONE=91... \
+GEMINI_API_KEY=... LLM_MODEL=<from scripts/gemini-models.mjs --probe> \
+node scripts/run-evals.mjs            # or: node scripts/run-evals.mjs rental-week-quote
+```
