@@ -481,6 +481,12 @@ function buildJobs() {
     apiCall('Expire lapsed holds', 'POST', '"/jobs/sweep"', null, [220, 0]),
     apiCall('Queue reminders', 'POST', '"/jobs/reminders/run"', null, [440, 0]),
     apiCall('Queue review requests', 'POST', '"/jobs/reviews/run"', null, [660, 0]),
+    // "Still alive" ping to an outside monitor (e.g. healthchecks.io), which
+    // alerts the owner when pings stop: server reclaimed, laptop off, n8n down
+    route('Heartbeat set?', 2, '$env.HEARTBEAT_URL ? 0 : 1', [880, 0]),
+    node('Ping heartbeat', 'n8n-nodes-base.httpRequest', 4.5,
+      { method: 'GET', url: '={{ $env.HEARTBEAT_URL }}', options: { timeout: 10000 } }, [1100, 0],
+      { onError: 'continueRegularOutput' }),
     node('Every day 21:00', 'n8n-nodes-base.scheduleTrigger', 1.2,
       { rule: { interval: [{ field: 'cronExpression', expression: '0 21 * * *' }] } }, [0, 220]),
     apiCall('Queue owner digest', 'POST', '"/reports/digest/send"', null, [220, 220]),
@@ -507,6 +513,8 @@ function buildJobs() {
   connect(c, 'Every 15 minutes', 'Expire lapsed holds');
   connect(c, 'Expire lapsed holds', 'Queue reminders');
   connect(c, 'Queue reminders', 'Queue review requests');
+  connect(c, 'Queue review requests', 'Heartbeat set?');
+  connect(c, 'Heartbeat set?', 'Ping heartbeat', { output: 0 });
   connect(c, 'Every day 21:00', 'Queue owner digest');
   connect(c, 'Every 3 hours', 'Ask Meta about the number');
   connect(c, 'Ask Meta about the number', 'Read the answer');

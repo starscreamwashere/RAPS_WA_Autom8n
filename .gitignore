@@ -9,3 +9,6 @@ evals-report.json
 
 # Meta onboarding result (contains a token)
 meta-onboarding.json
+
+# Database backups (scripts/backup.sh)
+backups/

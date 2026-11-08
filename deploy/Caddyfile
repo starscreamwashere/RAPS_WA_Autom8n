@@ -1,0 +1,24 @@
+# Front door for the bot. CADDY_SITE is the domain (e.g. bot.rapspowerplay.com,
+# which gets a free Let's Encrypt certificate automatically) or ":80" behind
+# Cloudflare Tunnel. Only Meta's webhook path is passed to n8n; the n8n editor
+# is never public (open it through an SSH tunnel, see docs/DEPLOY.md).
+{$CADDY_SITE} {
+	encode gzip
+
+	handle /webhook/* {
+		reverse_proxy n8n:5678
+	}
+
+	handle /healthz {
+		respond "ok" 200
+	}
+
+	handle {
+		respond "Not found" 404
+	}
+
+	log {
+		output stdout
+		format console
+	}
+}

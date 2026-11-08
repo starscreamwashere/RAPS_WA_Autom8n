@@ -101,6 +101,40 @@
     },
     {
       "id": "n-005",
+      "name": "Heartbeat set?",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.5,
+      "position": [
+        880,
+        0
+      ],
+      "parameters": {
+        "mode": "expression",
+        "numberOutputs": 2,
+        "output": "={{ $env.HEARTBEAT_URL ? 0 : 1 }}",
+        "options": {}
+      }
+    },
+    {
+      "id": "n-006",
+      "name": "Ping heartbeat",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        1100,
+        0
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.HEARTBEAT_URL }}",
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "n-007",
       "name": "Every day 21:00",
       "type": "n8n-nodes-base.scheduleTrigger",
       "typeVersion": 1.2,
@@ -120,7 +154,7 @@
       }
     },
     {
-      "id": "n-006",
+      "id": "n-008",
       "name": "Queue owner digest",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.5,
@@ -146,7 +180,7 @@
       }
     },
     {
-      "id": "n-007",
+      "id": "n-009",
       "name": "Every 3 hours",
       "type": "n8n-nodes-base.scheduleTrigger",
       "typeVersion": 1.2,
@@ -166,7 +200,7 @@
       }
     },
     {
-      "id": "n-008",
+      "id": "n-010",
       "name": "Ask Meta about the number",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.5,
@@ -208,7 +242,7 @@
       "onError": "continueRegularOutput"
     },
     {
-      "id": "n-009",
+      "id": "n-011",
       "name": "Read the answer",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -222,7 +256,7 @@
       }
     },
     {
-      "id": "n-010",
+      "id": "n-012",
       "name": "Record health check",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.5,
@@ -251,7 +285,7 @@
       }
     },
     {
-      "id": "n-011",
+      "id": "n-013",
       "name": "Alert needed?",
       "type": "n8n-nodes-base.switch",
       "typeVersion": 3.5,
@@ -267,7 +301,7 @@
       }
     },
     {
-      "id": "n-012",
+      "id": "n-014",
       "name": "Push alert to owner",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.5,
@@ -334,6 +368,28 @@
         [
           {
             "node": "Queue review requests",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Queue review requests": {
+      "main": [
+        [
+          {
+            "node": "Heartbeat set?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Heartbeat set?": {
+      "main": [
+        [
+          {
+            "node": "Ping heartbeat",
             "type": "main",
             "index": 0
           }
