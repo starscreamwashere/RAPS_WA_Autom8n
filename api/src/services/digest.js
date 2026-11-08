@@ -45,6 +45,11 @@ async function digest(date = istDate(clock.now())) {
         AND hold_expires_at >= $1 AND hold_expires_at < $2`, range);
   const noShows = await one(
     `SELECT count(*)::int AS n FROM bookings WHERE status = 'no_show' AND updated_at >= $1 AND updated_at < $2`, range);
+  // WF1 files one of these each time the AI could not answer (free-tier
+  // quota used up, Gemini outage): the signal to turn on Gemini billing
+  const aiFailures = await one(
+    `SELECT count(*)::int AS n FROM handoffs WHERE summary LIKE 'The bot could not reply%'
+        AND created_at >= $1 AND created_at < $2`, range);
   const openHandoffs = await many(
     `SELECT h.id, h.reason, l.name, l.phone, l.user_id, l.username FROM handoffs h JOIN leads l ON l.id = h.lead_id
       WHERE h.status = 'open' ORDER BY h.priority = 'urgent' DESC, h.created_at`);
@@ -67,6 +72,9 @@ async function digest(date = istDate(clock.now())) {
       ? `needs you: ${openHandoffs.slice(0, 5).map((h) => `#${h.id} ${h.reason.replace(/_/g, ' ')} ${who(h)}`).join(', ')}${openHandoffs.length > 5 ? ` +${openHandoffs.length - 5} more` : ''}`
       : 'nothing waiting on you',
     paused.length ? `bot paused for: ${paused.map(who).join(', ')}` : null,
+    aiFailures.n
+      ? `⚠️ the AI could not answer ${plural(aiFailures.n, 'time')} (quota or outage; customers got a holding reply). If this keeps happening, turn on Gemini billing`
+      : null,
     byAd.length ? `ads: ${byAd.map((a) => `${a.ad} ${a.leads} leads/${a.bookings} booked`).join(', ')}` : null,
   ].filter(Boolean);
 
@@ -82,6 +90,7 @@ async function digest(date = istDate(clock.now())) {
     tomorrow: tomorrow.map((b) => b.ref),
     open_handoffs: openHandoffs,
     paused_chats: paused,
+    ai_failures: aiFailures.n,
     ads: byAd,
     text: parts.join(' · ').replace(/\n/g, ' · '),
   };

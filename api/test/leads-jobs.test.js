@@ -137,3 +137,17 @@ test('nightly digest is a single line for the template variable', async () => {
   assert.match(d.text, /bot paused for: 9800000002/);
   assert.match(d.text, /ads: PS5 for a week 1 leads\/1 booked/);
 });
+
+test('digest counts the times the AI could not answer, the signal to turn on Gemini billing', async () => {
+  const P = '919800000099';
+  await api.post('/messages', { phone: P, direction: 'in', body: 'hi' });
+  assert.doesNotMatch((await api.get('/reports/digest')).body.text, /AI could not answer/);
+  for (let i = 0; i < 3; i++) {
+    // what WF1 files when Gemini fails (quota used up, outage)
+    await api.post('/handoffs', { phone: P, reason: 'other', priority: 'urgent',
+      summary: 'The bot could not reply (429 quota exceeded). Customer said: hi' });
+  }
+  const d = (await api.get('/reports/digest')).body;
+  assert.equal(d.ai_failures, 3);
+  assert.match(d.text, /the AI could not answer 3 times .*turn on Gemini billing/);
+});
