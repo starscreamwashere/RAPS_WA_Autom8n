@@ -7,6 +7,18 @@ function clean(obj) {
   return Object.fromEntries(Object.entries(obj).filter(([, val]) => val !== '' && val !== null && val !== undefined));
 }
 
+// n8n tool parameters arrive as strings: accept "true"/"yes"/"false"/"no"
+// for booleans and "a, b" for lists
+const bool = z.preprocess((x) => {
+  if (typeof x !== 'string') return x;
+  const t = x.trim().toLowerCase();
+  if (['true', 'yes', 'y', '1'].includes(t)) return true;
+  if (['false', 'no', 'n', '0'].includes(t)) return false;
+  return x;
+}, z.boolean());
+const list = z.preprocess((x) => (typeof x === 'string' ? x.split(',').map((t) => t.trim()).filter(Boolean) : x),
+  z.array(z.string().max(100)).max(20));
+
 const date = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'use YYYY-MM-DD');
 const time = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, 'use HH:MM (24h)');
 const phone = z.string().min(10).max(15);
@@ -37,12 +49,12 @@ const leadPatch = z.object({
   num_guests: int(1, 1000),
   child_age: int(0, 100),
   setups_needed: int(1, 20),
-  decoration_wanted: z.boolean(),
+  decoration_wanted: bool,
   rental_start_date: date,
   rental_days: int(1, 365),
   controllers_wanted: int(1, 4),
   area: z.string().max(200),
-  games_interest: z.array(z.string().max(100)).max(20),
+  games_interest: list,
   notes: z.string().max(2000),
 }).partial().strict();
 
@@ -53,7 +65,7 @@ const bookingRequest = z.discriminatedUnion('kind', [
     setups: int(1, 20).optional(),
     players: int(1, 500).optional(),
     hours: int(1, 8).optional(),
-    decoration: z.boolean().optional(),
+    decoration: bool.optional(),
   }),
   z.object({
     kind: z.literal('rental'),
@@ -69,7 +81,7 @@ const quoteRequest = z.object({
   kind: z.enum(['birthday', 'rental']),
   setups: int(1, 20).optional(),
   players: int(1, 500).optional(),
-  decoration: z.boolean().optional(),
+  decoration: bool.optional(),
   days: int(1, 365).optional(),
   start_date: date.optional(),
   end_date: date.optional(),
@@ -100,7 +112,7 @@ const handoff = z.object({
   summary: z.string().min(3).max(2000),
   details: z.record(z.any()).optional(),
   booking_ref: z.string().optional(),
-  pause_bot: z.boolean().optional(),
+  pause_bot: bool.optional(),
 });
 
 const payment = z.object({

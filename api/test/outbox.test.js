@@ -65,3 +65,40 @@ test('sent messages leave the queue; failures retry up to 5 times', async () => 
 test('the rental ID form link is in the rates', async () => {
   assert.match((await api.get('/rates')).body.rental.id_form_url, /^https:\/\/docs\.google\.com\/forms\//);
 });
+
+test('scheduled runs queue reminders, reviews and the digest exactly once', async () => {
+  await api.post('/messages', { phone: P, direction: 'in', body: 'hi', name: 'Rohan Mehta' });
+  const ref = (await rental(P, '2026-11-03', { days: 1 })).body.booking.ref;
+  clock.set('2026-11-02T11:35:00+05:30');
+  const [a, b] = await Promise.all([api.post('/jobs/reminders/run'), api.post('/jobs/reminders/run')]);
+  assert.equal(a.body.queued + b.body.queued, 1); // overlapping runs: one nudge only
+  let items = (await api.get('/outbox/pending')).body;
+  assert.equal(items.length, 1);
+  assert.match(items[0].text, /held until 12pm/);
+
+  await owner(`PAID ${ref} 95`);
+  await owner(`DONE ${ref}`);
+  clock.set('2026-11-02T22:00:00+05:30'); // 10pm: no review asks at night
+  assert.equal((await api.post('/jobs/reviews/run')).body.queued, 0);
+  clock.set('2026-11-03T10:30:00+05:30');
+  assert.equal((await api.post('/jobs/reviews/run')).body.queued, 1);
+  assert.equal((await api.post('/jobs/reviews/run')).body.queued, 0);
+
+  const d = (await api.post('/reports/digest/send')).body;
+  assert.equal(d.queued, 1);
+  items = (await api.get('/outbox/pending')).body;
+  assert.ok(items.some((i) => i.recipient === 'owner' && /Daily summary/.test(i.text)));
+});
+
+test('the profile carries recent conversation, oldest first, without the message being answered', async () => {
+  await api.post('/messages', { phone: P, direction: 'in', wa_message_id: 'w1', body: 'Need a PS5 for a week' });
+  await api.post('/messages', { phone: P, direction: 'out', body: 'Sure! How many controllers?' });
+  await api.post('/messages', { phone: P, direction: 'out', kind: 'owner_app', body: 'Hi, owner here 👋' });
+  await api.post('/messages', { phone: P, direction: 'in', wa_message_id: 'w2', body: '2 controllers' });
+  const p = (await api.get(`/leads/${P}?current=w2`)).body;
+  assert.deepEqual(p.recent_messages.map((m) => [m.from, m.text]), [
+    ['customer', 'Need a PS5 for a week'],
+    ['assistant', 'Sure! How many controllers?'],
+    ['team', 'Hi, owner here 👋'],
+  ]);
+});

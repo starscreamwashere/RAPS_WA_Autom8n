@@ -118,9 +118,10 @@ async function runTurn(state, text) {
   state.turn += 1;
   const messageId = `eval.${state.phone}.${state.turn}`;
   await api('POST', '/messages', { phone: state.phone, direction: 'in', wa_message_id: messageId, body: text, name: state.name });
-  const profile = (await api('GET', `/leads/${state.phone}`)).body;
+  // Memory is the message log, delivered inside the profile, as in WF1
+  const profile = (await api('GET', `/leads/${state.phone}?current=${encodeURIComponent(messageId)}`)).body;
   const system = systemTemplate.replace('{{NOW_IST}}', nowIstText()).replace('{{LEAD_PROFILE}}', JSON.stringify(profile, null, 2));
-  state.contents.push({ role: 'user', parts: [{ text }] });
+  state.contents = [{ role: 'user', parts: [{ text }] }];
   const calls = [];
   for (let step = 0; step < MAX_STEPS; step++) {
     const content = await gemini(state.contents, system);

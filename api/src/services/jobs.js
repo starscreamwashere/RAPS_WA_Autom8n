@@ -4,7 +4,8 @@ const { pool, withTx } = require('../db');
 const clock = require('../clock');
 const { HttpError } = require('../errors');
 const { getSettings } = require('../settings');
-const { istDate, addMinutes, fmtTime, fmtDate } = require('../time');
+const { istDate, istParts, addMinutes, fmtTime, fmtDate } = require('../time');
+const { enqueue } = require('./outbox');
 const { rupees, bookingWhen, bookingWhat, who } = require('../format');
 const { sweepExpiredHolds } = require('./availability');
 
@@ -12,18 +13,18 @@ const MARKABLE = ['hold_nudged_at', 'reminder_sent_at', 'pickup_reminder_sent_at
 
 const firstName = (name) => (name ? name.split(/\s+/)[0] : 'there');
 
-async function query(sql, params) {
-  const { rows } = await pool.query(sql, params);
+async function query(sql, params, client = pool) {
+  const { rows } = await client.query(sql, params);
   return rows;
 }
 
 // Unpaid holds about to lapse: nudge the customer (inside their 24h window)
-async function holdNudges(now, settings) {
+async function holdNudges(now, settings, client) {
   const rows = await query(
     `SELECT b.*, l.phone, l.name FROM bookings b JOIN leads l ON l.id = b.lead_id
       WHERE b.status = 'held' AND b.reschedule_of IS NULL AND b.payment_claimed_at IS NULL
         AND b.hold_nudged_at IS NULL AND b.hold_expires_at > $1 AND b.hold_expires_at <= $2`,
-    [now, addMinutes(now, settings.hold_nudge_before_min)]);
+    [now, addMinutes(now, settings.hold_nudge_before_min)], client);
   return rows.map((b) => ({
     type: 'hold_nudge', booking_ref: b.ref, phone: b.phone, mark: 'hold_nudged_at',
     text: `Hi ${firstName(b.name)}! Your slot ${b.ref} (${bookingWhen(b)}) is held until ${fmtTime(b.hold_expires_at)}. `
@@ -32,12 +33,12 @@ async function holdNudges(now, settings) {
 }
 
 // Day-before reminders for confirmed bookings (business-initiated: template)
-async function startReminders(now, settings) {
+async function startReminders(now, settings, client) {
   const rows = await query(
     `SELECT b.*, l.phone, l.name FROM bookings b JOIN leads l ON l.id = b.lead_id
       WHERE b.status = 'confirmed' AND b.reminder_sent_at IS NULL
         AND b.delivery_at > $1 AND b.delivery_at <= $2`,
-    [now, addMinutes(now, settings.reminder_hours_before * 60)]);
+    [now, addMinutes(now, settings.reminder_hours_before * 60)], client);
   return rows.map((b) => {
     const what = b.kind === 'birthday' ? `Birthday Gaming Station (${bookingWhat(b)})` : `PS5 rental (${bookingWhat(b)})`;
     const when = b.kind === 'birthday'
@@ -52,12 +53,12 @@ async function startReminders(now, settings) {
 }
 
 // Rental pickup day: "your session ends today, want to extend?"
-async function pickupReminders(now) {
+async function pickupReminders(now, client) {
   const rows = await query(
     `SELECT b.*, l.phone, l.name FROM bookings b JOIN leads l ON l.id = b.lead_id
       WHERE b.kind = 'rental' AND b.status = 'confirmed' AND b.pickup_reminder_sent_at IS NULL
         AND b.rental_end_date = $1::date`,
-    [istDate(now)]);
+    [istDate(now)], client);
   return rows.map((b) => ({
     type: 'pickup_reminder', booking_ref: b.ref, phone: b.phone, mark: 'pickup_reminder_sent_at',
     template: 'pickup_reminder', variables: [firstName(b.name), bookingWhat(b), b.ref],
@@ -66,12 +67,12 @@ async function pickupReminders(now) {
   }));
 }
 
-async function reviewAsks(now) {
+async function reviewAsks(now, client) {
   const rows = await query(
     `SELECT b.*, l.phone, l.name FROM bookings b JOIN leads l ON l.id = b.lead_id
       WHERE b.status = 'completed' AND b.review_asked_at IS NULL
         AND b.completed_at <= $1 AND b.completed_at > $2`,
-    [addMinutes(now, -60), addMinutes(now, -72 * 60)]);
+    [addMinutes(now, -60), addMinutes(now, -72 * 60)], client);
   return rows.map((b) => ({
     type: 'review_request', booking_ref: b.ref, phone: b.phone, mark: 'review_asked_at',
     template: 'review_request', variables: [firstName(b.name)],
@@ -79,13 +80,39 @@ async function reviewAsks(now) {
   }));
 }
 
-async function remindersDue() {
+async function remindersDue(client = pool) {
   const now = clock.now();
-  const settings = await getSettings();
-  return [...await holdNudges(now, settings), ...await startReminders(now, settings), ...await pickupReminders(now)];
+  const settings = await getSettings(client);
+  return [...await holdNudges(now, settings, client), ...await startReminders(now, settings, client),
+    ...await pickupReminders(now, client)];
 }
 
-const reviewsDue = () => reviewAsks(clock.now());
+const reviewsDue = (client = pool) => reviewAsks(clock.now(), client);
+
+// Review requests go out only in the daytime
+const REVIEW_HOURS = [10, 20];
+
+// Queue every due item in the outbox and mark it, in one transaction under a
+// lock, so overlapping runs never send the same reminder twice.
+async function queueDue(list) {
+  return withTx(async (client) => {
+    await client.query('SELECT pg_advisory_xact_lock(7270003)');
+    const items = await list(client);
+    for (const item of items) {
+      await enqueue([{ to: 'customer', phone: item.phone, text: item.text }], client);
+      await client.query(`UPDATE bookings SET ${item.mark} = $2 WHERE ref = $1`, [item.booking_ref, clock.now()]);
+    }
+    return { queued: items.length, items: items.map(({ type, booking_ref }) => ({ type, booking_ref })) };
+  });
+}
+
+const runReminders = () => queueDue(remindersDue);
+
+async function runReviews() {
+  const { hh } = istParts(clock.now());
+  if (hh < REVIEW_HOURS[0] || hh >= REVIEW_HOURS[1]) return { queued: 0, items: [], skipped: 'outside daytime hours' };
+  return queueDue(reviewsDue);
+}
 
 // Releases lapsed holds. Lapsed reschedule holds are reported to the owner;
 // ordinary unpaid holds just show up in the nightly digest.
@@ -112,4 +139,4 @@ async function mark(ref, field) {
   return { ok: true };
 }
 
-module.exports = { remindersDue, reviewsDue, sweep, mark, MARKABLE };
+module.exports = { remindersDue, reviewsDue, runReminders, runReviews, sweep, mark, MARKABLE };

@@ -49,17 +49,25 @@ function missingFields(lead, settings) {
   return { missing_for_quote: quote, missing_for_booking: booking, birthday_bookings_enabled: settings.birthday_bookings_enabled };
 }
 
-async function leadProfile(phone, client = pool) {
+// Conversation memory comes from the message log, so the bot also sees what
+// the owner typed to the customer from the WhatsApp Business app.
+const HISTORY = 30;
+
+async function leadProfile(phone, client = pool, { currentMessageId } = {}) {
   const lead = await getLeadByPhone(client, phone);
   if (!lead) throw notFound('Lead');
   const settings = await getSettings(client);
-  const [{ rows: bookings }, { rows: handoffs }] = await Promise.all([
+  const [{ rows: bookings }, { rows: handoffs }, { rows: history }] = await Promise.all([
     client.query(
       `SELECT ref, kind, status, setups, controllers, event_start, event_end, rental_start_date, rental_end_date,
               price_total, advance_due, hold_expires_at, payment_claimed_at
          FROM bookings WHERE lead_id = $1 AND status IN ('held','confirmed') AND reschedule_of IS NULL
         ORDER BY delivery_at`, [lead.id]),
     client.query(`SELECT id, reason, summary, created_at FROM handoffs WHERE lead_id = $1 AND status = 'open'`, [lead.id]),
+    client.query(
+      `SELECT direction, kind, body, created_at FROM messages
+        WHERE lead_id = $1 AND body IS NOT NULL AND wa_message_id IS DISTINCT FROM $2
+        ORDER BY created_at DESC, id DESC LIMIT $3`, [lead.id, currentMessageId || null, HISTORY]),
   ]);
   const { inserted, ...clean } = lead;
   return {
@@ -68,6 +76,12 @@ async function leadProfile(phone, client = pool) {
     ...missingFields(lead, settings),
     active_bookings: bookings,
     open_handoffs: handoffs,
+    // Oldest first; `team` = the owner typing from the Business app
+    recent_messages: history.reverse().map((m) => ({
+      from: m.direction === 'in' ? 'customer' : m.kind === 'owner_app' ? 'team' : 'assistant',
+      at: m.created_at,
+      text: m.body,
+    })),
   };
 }
 

@@ -32,7 +32,7 @@ router.post('/messages', async (req, res) => {
 });
 
 router.get('/leads/:phone', async (req, res) => {
-  res.json(await leads.leadProfile(req.params.phone));
+  res.json(await leads.leadProfile(req.params.phone, undefined, { currentMessageId: req.query.current }));
 });
 
 router.patch('/leads/:phone', async (req, res) => {
@@ -172,6 +172,13 @@ router.post('/owner/command', async (req, res) => {
 // ---- Jobs and reports ----------------------------------------------------------
 router.get('/jobs/reminders-due', async (req, res) => res.json(await jobs.remindersDue()));
 router.get('/jobs/reviews-due', async (req, res) => res.json(await jobs.reviewsDue()));
+router.post('/jobs/reminders/run', async (req, res) => res.json(await jobs.runReminders()));
+router.post('/jobs/reviews/run', async (req, res) => res.json(await jobs.runReviews()));
+router.post('/reports/digest/send', async (req, res) => {
+  const d = await digest();
+  const queued = await outbox.enqueue([{ to: 'owner', text: `🌙 Daily summary · ${d.text}` }]);
+  res.json({ queued, text: d.text });
+});
 router.post('/jobs/sweep', async (req, res) => res.json(await queued(await jobs.sweep())));
 router.post('/jobs/mark', async (req, res) => {
   const { booking_ref, field } = v.z.object({ booking_ref: v.z.string(), field: v.z.string() }).parse(req.body);
