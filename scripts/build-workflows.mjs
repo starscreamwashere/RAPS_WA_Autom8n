@@ -57,7 +57,10 @@ function whatsappSend(name, payload, position, extra = {}) {
     options: { timeout: 20000 },
   }, position, extra);
 }
-const textMessage = (to, text) => `{ messaging_product: "whatsapp", recipient_type: "individual", to: ${to}, type: "text", text: { preview_url: false, body: ${text} } }`;
+// A customer with a WhatsApp username may have no phone in the webhook; then
+// the contact key is their business-scoped user ID ("IN.…"), sent as recipient
+const address = (key) => `...(/^[A-Z]{2}\\./.test(String(${key})) ? { recipient: ${key} } : { to: ${key} })`;
+const textMessage = (to, text) => `{ messaging_product: "whatsapp", recipient_type: "individual", ${address(to)}, type: "text", text: { preview_url: false, body: ${text} } }`;
 
 function code(name, js, position, mode = 'runOnceForAllItems') {
   return node(name, 'n8n-nodes-base.code', 2, { mode, jsCode: js.trim() }, position);
@@ -140,15 +143,25 @@ const out = [];
 for (const entry of body.entry || []) {
   for (const change of entry.changes || []) {
     const v = change.value || {};
-    const names = Object.fromEntries((v.contacts || []).map((c) => [c.wa_id, c.profile?.name]));
+    // With WhatsApp usernames the phone (from / wa_id) can be missing; the
+    // business-scoped user ID (from_user_id / user_id) is always there.
+    // "phone" below is the contact key: the phone if known, else the user ID.
+    const contacts = v.contacts || [];
+    const contactFor = (phone, userId) => contacts.find((c) => (phone && c.wa_id === phone) || (userId && c.user_id === userId))
+      || (contacts.length === 1 ? contacts[0] : {});
     for (const m of v.messages || []) {
       const text = describe(m);
       if (text == null) continue;
-      const from = digits(m.from);
+      const c = contactFor(m.from, m.from_user_id);
+      const from = digits(m.from || c.wa_id);
+      const userId = m.from_user_id || c.user_id || null;
+      if (!from && !userId) continue;
       out.push({ json: {
-        kind: from === owner ? 'owner' : 'customer',
-        phone: from,
-        name: names[m.from] || null,
+        kind: from && from === owner ? 'owner' : 'customer',
+        phone: from || userId,
+        user_id: userId,
+        username: c.profile?.username || null,
+        name: c.profile?.name || null,
         wa_message_id: m.id,
         message_type: m.type,
         text: String(text).trim(),
@@ -158,7 +171,12 @@ for (const entry of body.entry || []) {
     for (const m of v.message_echoes || []) {
       const text = describe(m);
       if (text == null) continue;
-      out.push({ json: { kind: 'echo', phone: digits(m.to), wa_message_id: m.id, message_type: m.type, text: String(text).trim() } });
+      const c = contactFor(m.to, m.to_user_id);
+      const to = digits(m.to || c.wa_id);
+      const userId = m.to_user_id || c.user_id || null;
+      if (!to && !userId) continue;
+      out.push({ json: { kind: 'echo', phone: to || userId, user_id: userId, username: c.profile?.username || null,
+        wa_message_id: m.id, message_type: m.type, text: String(text).trim() } });
     }
   }
 }
@@ -289,12 +307,12 @@ function buildInbound() {
 
     // Owner typed to a customer from the Business app: log it, bot steps back
     apiCall('Log owner app message', 'POST', '"/messages"',
-      '{ phone: $json.phone, direction: "out", kind: "owner_app", wa_message_id: $json.wa_message_id, body: $json.text }', [700, 280]),
+      '{ phone: $json.phone, user_id: $json.user_id || undefined, username: $json.username || undefined, direction: "out", kind: "owner_app", wa_message_id: $json.wa_message_id, body: $json.text }', [700, 280]),
     apiCall('Pause bot for customer', 'POST', '"/leads/" + $(\'Parse Meta payload\').item.json.phone + "/pause"', null, [920, 280]),
 
     // Customer: log, then reply unless duplicate / opted out / owner took over
     apiCall('Log inbound', 'POST', '"/messages"',
-      '{ phone: $json.phone, direction: "in", wa_message_id: $json.wa_message_id, kind: $json.message_type, body: $json.text, name: $json.name || undefined, referral: $json.referral || undefined }',
+      '{ phone: $json.phone, user_id: $json.user_id || undefined, username: $json.username || undefined, direction: "in", wa_message_id: $json.wa_message_id, kind: $json.message_type, body: $json.text, name: $json.name || undefined, referral: $json.referral || undefined }',
       [700, 500]),
     route('Should reply?', 2, '(!$json.duplicate && !$json.opted_out && !$json.bot_paused) ? 0 : 1', [920, 500]),
     apiCall('Load profile', 'GET',
@@ -353,9 +371,12 @@ const OUTBOX_PAYLOAD_JS = String.raw`
 // Free text inside the 24h window, otherwise the approved template with the
 // message flattened into its single body variable
 const m = $input.item.json;
+// The API gives "to" (phone) or, for a customer known only by their WhatsApp
+// user ID (usernames), "user_id", which Meta takes as "recipient"
+const who = m.to ? { to: m.to } : { recipient: m.user_id || m.phone };
 const payload = m.send_as === 'text'
-  ? { messaging_product: 'whatsapp', recipient_type: 'individual', to: m.phone, type: 'text', text: { preview_url: false, body: m.text } }
-  : { messaging_product: 'whatsapp', recipient_type: 'individual', to: m.phone, type: 'template',
+  ? { messaging_product: 'whatsapp', recipient_type: 'individual', ...who, type: 'text', text: { preview_url: false, body: m.text } }
+  : { messaging_product: 'whatsapp', recipient_type: 'individual', ...who, type: 'template',
       template: { name: m.template, language: { code: $env.WA_TEMPLATE_LANG || 'en' },
         components: [{ type: 'body', parameters: m.variables.map((v) => ({ type: 'text', text: String(v).slice(0, 1000) })) }] } };
 return { json: { id: m.id, payload } };

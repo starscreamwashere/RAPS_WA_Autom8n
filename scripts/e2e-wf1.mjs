@@ -29,7 +29,7 @@ const api = async (path, init = {}) => {
   const res = await fetch(`${API}${path}`, { ...init, headers: { 'x-api-key': RAPS_API_KEY, 'content-type': 'application/json', ...init.headers } });
   return { status: res.status, body: await res.json().catch(() => ({})) };
 };
-const sentTo = async (phone) => (await (await fetch(`${MOCK}/__sent`)).json()).filter((m) => m.body.to === phone && !m.failed);
+const sentTo = async (phone) => (await (await fetch(`${MOCK}/__sent`)).json()).filter((m) => (m.body.to === phone || m.body.recipient === phone) && !m.failed);
 
 // ---- Meta-shaped webhooks ---------------------------------------------------
 
@@ -42,6 +42,12 @@ const envelope = (field, value) => ({
 const textFrom = (phone, text, name = 'E2E Tester', id = wamid()) => envelope('messages', {
   contacts: [{ wa_id: phone, profile: { name } }],
   messages: [{ from: phone, id, timestamp: String(Math.floor(Date.now() / 1000)), type: 'text', text: { body: text } }],
+});
+// A customer with a WhatsApp username: no phone in the webhook, only their
+// business-scoped user ID
+const textFromUsername = (userId, username, text, id = wamid()) => envelope('messages', {
+  contacts: [{ user_id: userId, profile: { name: 'Asha', username } }],
+  messages: [{ from_user_id: userId, id, timestamp: String(Math.floor(Date.now() / 1000)), type: 'text', text: { body: text } }],
 });
 // What Meta sends when the owner types to a customer from the WhatsApp Business app
 const echoTo = (phone, text) => envelope('smb_message_echoes', {
@@ -177,6 +183,17 @@ await check('owner RESUME hands the customer back to the bot', async () => {
   assert(got.length > before, 'no reply to the owner');
   const lead = (await api(`/leads/${customer}`)).body;
   assert(lead.bot_paused === false, `bot_paused is ${lead.bot_paused}`);
+});
+
+await check('customer with a WhatsApp username (no phone): answered by user ID', async () => {
+  const userId = `IN.${Date.now()}${seq}`;
+  await deliver(textFromUsername(userId, 'asha.games', 'Hi! PS5 for 1 day with 1 controller, price?'));
+  const got = await waitForSend(userId, 1);
+  assert(got.length === 1, `expected 1 reply, got ${got.length}`);
+  assert(got[0].body.recipient === userId && !got[0].body.to, 'reply not addressed by recipient');
+  console.log(`   bot: ${(got[0].body.text?.body || '').replace(/\n/g, ' / ').slice(0, 160)}`);
+  const lead = (await api(`/leads/${userId}`)).body;
+  assert(lead.user_id === userId && lead.phone === null && lead.username === 'asha.games', `lead: ${JSON.stringify(lead).slice(0, 200)}`);
 });
 
 const passed = results.filter((r) => r.pass).length;

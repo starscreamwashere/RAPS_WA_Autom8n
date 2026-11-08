@@ -21,11 +21,17 @@ const list = z.preprocess((x) => (typeof x === 'string' ? x.split(',').map((t) =
 
 const date = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'use YYYY-MM-DD');
 const time = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, 'use HH:MM (24h)');
-const phone = z.string().min(10).max(15);
+// A contact key: a phone number (10-15 digits) or a WhatsApp business-scoped
+// user ID such as 'IN.13491208655302741918' (customers with a username)
+const BSUID = /^[A-Z]{2}\.[A-Za-z0-9.]{1,160}$/;
+const userId = z.string().trim().regex(BSUID, 'not a WhatsApp user ID');
+const phone = z.string().trim().refine((s) => BSUID.test(s) || /^\+?[\d\s-]{10,20}$/.test(s), 'phone number or WhatsApp user ID');
 const int = (min, max) => z.coerce.number().int().min(min).max(max);
 
 const messageIn = z.object({
-  phone,
+  phone: phone.optional(),
+  user_id: userId.optional(),
+  username: z.string().max(100).optional(),
   direction: z.enum(['in', 'out']),
   wa_message_id: z.string().optional(),
   kind: z.string().max(30).optional(),
@@ -34,7 +40,7 @@ const messageIn = z.object({
   name: z.string().max(200).optional(),
   referral: z.record(z.any()).optional(),
   raw: z.any().optional(),
-});
+}).refine((v) => v.phone || v.user_id, 'phone or user_id is required');
 
 const leadPatch = z.object({
   name: z.string().max(200),

@@ -45,9 +45,9 @@ async function digest(date = istDate(clock.now())) {
   const noShows = await one(
     `SELECT count(*)::int AS n FROM bookings WHERE status = 'no_show' AND updated_at >= $1 AND updated_at < $2`, range);
   const openHandoffs = await many(
-    `SELECT h.id, h.reason, l.name, l.phone FROM handoffs h JOIN leads l ON l.id = h.lead_id
+    `SELECT h.id, h.reason, l.name, l.phone, l.user_id, l.username FROM handoffs h JOIN leads l ON l.id = h.lead_id
       WHERE h.status = 'open' ORDER BY h.priority = 'urgent' DESC, h.created_at`);
-  const paused = await many(`SELECT name, phone FROM leads WHERE bot_paused_at IS NOT NULL`);
+  const paused = await many(`SELECT name, phone, user_id, username FROM leads WHERE bot_paused_at IS NOT NULL`);
   const tomorrow = (await daySchedule(pool, addDays(date, 1))).filter((b) => !b.reschedule_of);
 
   const parts = [

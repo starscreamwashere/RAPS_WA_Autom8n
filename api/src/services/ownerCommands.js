@@ -3,20 +3,20 @@
 const { pool, withTx } = require('../db');
 const clock = require('../clock');
 const { HttpError } = require('../errors');
-const { normalizePhone, displayPhone } = require('../phone');
+const { normalizePhone, isUserId, contactOf } = require('../phone');
 const { istDate, addDays } = require('../time');
 const { getSettings, setSetting, EDITABLE } = require('../settings');
 const { who } = require('../format');
 const bookings = require('./bookings');
 const { resolveHandoff } = require('./handoffs');
-const { resumeBot, getLeadByPhone } = require('./leads');
+const { resumeBot, getLeadByContact } = require('./leads');
 
 const HELP = [
   'Commands:',
   'PAID RP-1042 4500 [upi|cash|bank]',
   'DONE RP-1042 · NOSHOW RP-1042 · CANCEL RP-1042',
   'MOVE RP-1042 · MOVE RP-1042 2026-10-26 16:00 · DECLINE RP-1042',
-  'RESUME 98XXXXXXXX (or RESUME RP-1042) · PAUSED',
+  'RESUME 98XXXXXXXX (or RP-1042, or @username) · PAUSED',
   'RESOLVE 17 · TODAY · TOMORROW · SCHEDULE 2026-10-26',
   'BIRTHDAYS ON/OFF · SETTINGS · SET travel_buffer_min 60',
 ].join('\n');
@@ -40,7 +40,7 @@ function levenshtein(a, b) {
 
 async function didYouMean(ref) {
   const { rows } = await pool.query(
-    `SELECT b.ref, l.name, l.phone FROM bookings b JOIN leads l ON l.id = b.lead_id
+    `SELECT b.ref, l.name, l.phone, l.user_id, l.username FROM bookings b JOIN leads l ON l.id = b.lead_id
       WHERE b.reschedule_of IS NULL AND (b.status IN ('held','confirmed') OR b.created_at > $1)`,
     [new Date(clock.now().getTime() - 60 * 86400000)]);
   const sorted = (s) => s.split('').sort().join('');
@@ -132,21 +132,26 @@ async function run(text) {
     }
     case 'RESUME': {
       const target = args[0];
-      let phone;
-      if (toRef(target) && !/^\d{10,}$/.test(target)) {
+      // A phone, a booking number, @username, or the WhatsApp user ID shown in the alert
+      let lead = null;
+      if (target?.startsWith('@')) {
+        lead = (await pool.query('SELECT * FROM leads WHERE lower(username) = lower($1)', [target.slice(1)])).rows[0] || null;
+      } else if (target && isUserId(target)) {
+        lead = await getLeadByContact(pool, target);
+      } else if (toRef(target) && !/^\d{10,}$/.test(target)) {
         const b = await bookings.loadBooking(pool, await requireRef(target));
-        phone = b.phone;
+        lead = await getLeadByContact(pool, contactOf(b));
+      } else if (normalizePhone(target)) {
+        lead = await getLeadByContact(pool, normalizePhone(target));
       } else {
-        phone = normalizePhone(target);
+        throw new HttpError(400, 'USAGE', 'Usage: RESUME 98XXXXXXXX, RESUME RP-1042 or RESUME @username');
       }
-      if (!phone) throw new HttpError(400, 'USAGE', 'Usage: RESUME 98XXXXXXXX or RESUME RP-1042');
-      const lead = await getLeadByPhone(pool, phone);
-      if (!lead) throw new HttpError(404, 'NOT_FOUND', `No chat with ${displayPhone(phone)}.`);
-      await resumeBot(phone);
+      if (!lead) throw new HttpError(404, 'NOT_FOUND', `No chat with ${target}.`);
+      await resumeBot(contactOf(lead));
       return { reply: `✅ Bot is replying to ${who(lead)} again.` };
     }
     case 'PAUSED': {
-      const { rows } = await pool.query('SELECT name, phone FROM leads WHERE bot_paused_at IS NOT NULL ORDER BY bot_paused_at');
+      const { rows } = await pool.query('SELECT name, phone, user_id, username FROM leads WHERE bot_paused_at IS NOT NULL ORDER BY bot_paused_at');
       return { reply: rows.length ? `🤫 Paused chats (${rows.length}):\n${rows.map((l) => `• ${who(l)}`).join('\n')}` : '✅ No paused chats.' };
     }
     case 'TODAY': return { reply: (await bookings.schedule(istDate(clock.now()))).text };

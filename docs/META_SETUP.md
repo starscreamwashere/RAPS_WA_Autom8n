@@ -247,15 +247,13 @@ Meta charges per delivered message (rates in INR on
 
 ## Known gaps to close before or soon after go-live
 
-1. **Usernames (business-scoped user IDs).** WhatsApp is rolling out usernames. A
-   customer who adopts one may arrive **without a phone number**, identified only by
-   a `user_id` such as `IN.1349…`. Meta says supporting this is required. Today the
-   whole system keys customers by phone, so such a message would be dropped. Meta
-   still includes the phone when the customer is in the business's contact book or
-   has chatted with the number in the last 30 days, which covers most existing
-   customers (the phase 5 contact sync helps), but new username-only customers need
-   code changes: store `user_id` on leads, accept messages without `from`, and send
-   with `recipient` instead of `to`.
+1. **Usernames (business-scoped user IDs): handled.** A customer who adopts a
+   WhatsApp username may arrive without a phone number, identified by a `user_id`
+   such as `IN.1349…`. Leads store the phone, the user ID and the username; the bot
+   answers by user ID (`recipient`) when there is no phone, and the two are merged
+   when the phone appears later. The owner sees such customers as `@username` and
+   can type `RESUME @username`. Tested in `api/test/usernames.test.js` and
+   `scripts/e2e-wf1.mjs`.
 2. **Chat history.** The history sync arrives as `history` webhooks, which WF1
    currently ignores. Importing it would give the bot memory of past chats; optional.
 3. **Disconnection alert.** An `account_update` with `PARTNER_REMOVED` means the API

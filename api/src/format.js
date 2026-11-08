@@ -1,5 +1,5 @@
 const { fmtDate, fmtTime } = require('./time');
-const { displayPhone } = require('./phone');
+const { displayContact } = require('./phone');
 
 const rupees = (n) => `₹${Number(n).toLocaleString('en-IN')}`;
 
@@ -20,7 +20,7 @@ function bookingWhat(b) {
 }
 
 function who(lead) {
-  return lead.name ? `${lead.name} (${displayPhone(lead.phone)})` : displayPhone(lead.phone);
+  return lead.name ? `${lead.name} (${displayContact(lead)})` : displayContact(lead);
 }
 
 module.exports = { rupees, plural, bookingWhen, bookingWhat, who };

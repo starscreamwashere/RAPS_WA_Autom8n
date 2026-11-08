@@ -79,7 +79,7 @@
       ],
       "parameters": {
         "mode": "runOnceForAllItems",
-        "jsCode": "// Verifies Meta's signature, then turns the webhook payload into one item per\n// message: customer messages, owner commands, and echoes of messages the\n// owner typed from the WhatsApp Business app (coexistence).\nconst crypto = require('crypto');\nconst item = $input.first();\nconst body = item.json.body || {};\n\nconst secret = String($env.WA_APP_SECRET || '').trim();\nif (secret) {\n  const raw = Buffer.from(item.binary?.data?.data || '', 'base64');\n  const given = String(item.json.headers['x-hub-signature-256'] || '');\n  const expected = 'sha256=' + crypto.createHmac('sha256', secret).update(raw).digest('hex');\n  if (given.length !== expected.length || !crypto.timingSafeEqual(Buffer.from(given), Buffer.from(expected))) {\n    return []; // not from Meta: ignore\n  }\n}\n\nconst digits = (p) => {\n  const d = String(p || '').replace(/\\D/g, '');\n  return d.length === 10 ? '91' + d : d;\n};\nconst owner = digits($env.OWNER_PHONE);\n\n// WhatsApp message → the text the bot sees ([image], [voice note], …)\nfunction describe(m) {\n  switch (m.type) {\n    case 'text': return m.text?.body;\n    case 'button': return m.button?.text;\n    case 'interactive': return m.interactive?.button_reply?.title || m.interactive?.list_reply?.title;\n    case 'image': return '[image]' + (m.image?.caption ? ' ' + m.image.caption : '');\n    case 'video': return '[video]' + (m.video?.caption ? ' ' + m.video.caption : '');\n    case 'audio': return '[voice note]';\n    case 'document': return '[document] ' + (m.document?.filename || '');\n    case 'sticker': return '[sticker]';\n    case 'location': {\n      const l = m.location || {};\n      return '[location: ' + [l.name, l.address].filter(Boolean).join(', ') + ' (' + l.latitude + ',' + l.longitude + ')]';\n    }\n    case 'contacts': return '[contact card]';\n    case 'reaction': return null; // reactions need no reply\n    default: return '[unsupported message]';\n  }\n}\n\nconst out = [];\nfor (const entry of body.entry || []) {\n  for (const change of entry.changes || []) {\n    const v = change.value || {};\n    const names = Object.fromEntries((v.contacts || []).map((c) => [c.wa_id, c.profile?.name]));\n    for (const m of v.messages || []) {\n      const text = describe(m);\n      if (text == null) continue;\n      const from = digits(m.from);\n      out.push({ json: {\n        kind: from === owner ? 'owner' : 'customer',\n        phone: from,\n        name: names[m.from] || null,\n        wa_message_id: m.id,\n        message_type: m.type,\n        text: String(text).trim(),\n        referral: m.referral || null,\n      } });\n    }\n    for (const m of v.message_echoes || []) {\n      const text = describe(m);\n      if (text == null) continue;\n      out.push({ json: { kind: 'echo', phone: digits(m.to), wa_message_id: m.id, message_type: m.type, text: String(text).trim() } });\n    }\n  }\n}\nreturn out;"
+        "jsCode": "// Verifies Meta's signature, then turns the webhook payload into one item per\n// message: customer messages, owner commands, and echoes of messages the\n// owner typed from the WhatsApp Business app (coexistence).\nconst crypto = require('crypto');\nconst item = $input.first();\nconst body = item.json.body || {};\n\nconst secret = String($env.WA_APP_SECRET || '').trim();\nif (secret) {\n  const raw = Buffer.from(item.binary?.data?.data || '', 'base64');\n  const given = String(item.json.headers['x-hub-signature-256'] || '');\n  const expected = 'sha256=' + crypto.createHmac('sha256', secret).update(raw).digest('hex');\n  if (given.length !== expected.length || !crypto.timingSafeEqual(Buffer.from(given), Buffer.from(expected))) {\n    return []; // not from Meta: ignore\n  }\n}\n\nconst digits = (p) => {\n  const d = String(p || '').replace(/\\D/g, '');\n  return d.length === 10 ? '91' + d : d;\n};\nconst owner = digits($env.OWNER_PHONE);\n\n// WhatsApp message → the text the bot sees ([image], [voice note], …)\nfunction describe(m) {\n  switch (m.type) {\n    case 'text': return m.text?.body;\n    case 'button': return m.button?.text;\n    case 'interactive': return m.interactive?.button_reply?.title || m.interactive?.list_reply?.title;\n    case 'image': return '[image]' + (m.image?.caption ? ' ' + m.image.caption : '');\n    case 'video': return '[video]' + (m.video?.caption ? ' ' + m.video.caption : '');\n    case 'audio': return '[voice note]';\n    case 'document': return '[document] ' + (m.document?.filename || '');\n    case 'sticker': return '[sticker]';\n    case 'location': {\n      const l = m.location || {};\n      return '[location: ' + [l.name, l.address].filter(Boolean).join(', ') + ' (' + l.latitude + ',' + l.longitude + ')]';\n    }\n    case 'contacts': return '[contact card]';\n    case 'reaction': return null; // reactions need no reply\n    default: return '[unsupported message]';\n  }\n}\n\nconst out = [];\nfor (const entry of body.entry || []) {\n  for (const change of entry.changes || []) {\n    const v = change.value || {};\n    // With WhatsApp usernames the phone (from / wa_id) can be missing; the\n    // business-scoped user ID (from_user_id / user_id) is always there.\n    // \"phone\" below is the contact key: the phone if known, else the user ID.\n    const contacts = v.contacts || [];\n    const contactFor = (phone, userId) => contacts.find((c) => (phone && c.wa_id === phone) || (userId && c.user_id === userId))\n      || (contacts.length === 1 ? contacts[0] : {});\n    for (const m of v.messages || []) {\n      const text = describe(m);\n      if (text == null) continue;\n      const c = contactFor(m.from, m.from_user_id);\n      const from = digits(m.from || c.wa_id);\n      const userId = m.from_user_id || c.user_id || null;\n      if (!from && !userId) continue;\n      out.push({ json: {\n        kind: from && from === owner ? 'owner' : 'customer',\n        phone: from || userId,\n        user_id: userId,\n        username: c.profile?.username || null,\n        name: c.profile?.name || null,\n        wa_message_id: m.id,\n        message_type: m.type,\n        text: String(text).trim(),\n        referral: m.referral || null,\n      } });\n    }\n    for (const m of v.message_echoes || []) {\n      const text = describe(m);\n      if (text == null) continue;\n      const c = contactFor(m.to, m.to_user_id);\n      const to = digits(m.to || c.wa_id);\n      const userId = m.to_user_id || c.user_id || null;\n      if (!to && !userId) continue;\n      out.push({ json: { kind: 'echo', phone: to || userId, user_id: userId, username: c.profile?.username || null,\n        wa_message_id: m.id, message_type: m.type, text: String(text).trim() } });\n    }\n  }\n}\nreturn out;"
       }
     },
     {
@@ -150,7 +150,7 @@
         },
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({ messaging_product: \"whatsapp\", recipient_type: \"individual\", to: $('Parse Meta payload').item.json.phone, type: \"text\", text: { preview_url: false, body: $json.reply } }) }}",
+        "jsonBody": "={{ JSON.stringify({ messaging_product: \"whatsapp\", recipient_type: \"individual\", ...(/^[A-Z]{2}\\./.test(String($('Parse Meta payload').item.json.phone)) ? { recipient: $('Parse Meta payload').item.json.phone } : { to: $('Parse Meta payload').item.json.phone }), type: \"text\", text: { preview_url: false, body: $json.reply } }) }}",
         "options": {
           "timeout": 20000
         }
@@ -182,7 +182,7 @@
         },
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({ phone: $json.phone, direction: \"out\", kind: \"owner_app\", wa_message_id: $json.wa_message_id, body: $json.text }) }}"
+        "jsonBody": "={{ JSON.stringify({ phone: $json.phone, user_id: $json.user_id || undefined, username: $json.username || undefined, direction: \"out\", kind: \"owner_app\", wa_message_id: $json.wa_message_id, body: $json.text }) }}"
       }
     },
     {
@@ -237,7 +237,7 @@
         },
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({ phone: $json.phone, direction: \"in\", wa_message_id: $json.wa_message_id, kind: $json.message_type, body: $json.text, name: $json.name || undefined, referral: $json.referral || undefined }) }}"
+        "jsonBody": "={{ JSON.stringify({ phone: $json.phone, user_id: $json.user_id || undefined, username: $json.username || undefined, direction: \"in\", wa_message_id: $json.wa_message_id, kind: $json.message_type, body: $json.text, name: $json.name || undefined, referral: $json.referral || undefined }) }}"
       }
     },
     {
@@ -397,7 +397,7 @@
         },
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({ messaging_product: \"whatsapp\", recipient_type: \"individual\", to: $json.phone, type: \"text\", text: { preview_url: false, body: $json.reply } }) }}",
+        "jsonBody": "={{ JSON.stringify({ messaging_product: \"whatsapp\", recipient_type: \"individual\", ...(/^[A-Z]{2}\\./.test(String($json.phone)) ? { recipient: $json.phone } : { to: $json.phone }), type: \"text\", text: { preview_url: false, body: $json.reply } }) }}",
         "options": {
           "timeout": 20000
         }
@@ -469,7 +469,7 @@
         },
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({ messaging_product: \"whatsapp\", recipient_type: \"individual\", to: $json.phone, type: \"text\", text: { preview_url: false, body: $json.reply } }) }}",
+        "jsonBody": "={{ JSON.stringify({ messaging_product: \"whatsapp\", recipient_type: \"individual\", ...(/^[A-Z]{2}\\./.test(String($json.phone)) ? { recipient: $json.phone } : { to: $json.phone }), type: \"text\", text: { preview_url: false, body: $json.reply } }) }}",
         "options": {
           "timeout": 20000
         }

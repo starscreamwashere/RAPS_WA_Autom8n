@@ -2,7 +2,7 @@ const { pool, withTx, lockBookings, EXCLUSION_VIOLATION } = require('../db');
 const clock = require('../clock');
 const { HttpError, notFound } = require('../errors');
 const { getSettings } = require('../settings');
-const { normalizePhone } = require('../phone');
+const { normalizeContact, contactOf } = require('../phone');
 const { istDate, istDateTime, addDays, addMinutes, fmtTime, fmtDate, hhmm, daysBetween } = require('../time');
 const { rupees, bookingWhen, bookingWhat, who, plural } = require('../format');
 const { loadCatalog, quote } = require('./pricing');
@@ -63,7 +63,7 @@ function normalizeBookingRow(b) {
 
 async function loadBooking(client, ref, { forUpdate = false } = {}) {
   const { rows } = await client.query(
-    `SELECT b.*, l.phone, l.name FROM bookings b JOIN leads l ON l.id = b.lead_id
+    `SELECT b.*, l.phone, l.user_id, l.username, l.name FROM bookings b JOIN leads l ON l.id = b.lead_id
       WHERE upper(b.ref) = upper($1) ${forUpdate ? 'FOR UPDATE OF b' : ''}`, [ref]);
   return rows[0] ? normalizeBookingRow(rows[0]) : null;
 }
@@ -75,8 +75,9 @@ async function bookingOrThrow(client, ref, opts) {
 }
 
 // Customer-side calls may only touch the caller's own bookings
+// (the caller may be known by phone or by WhatsApp user ID)
 function assertOwner(b, phone) {
-  if (phone && normalizePhone(phone) !== b.phone) throw notFound(`Booking ${b.ref}`);
+  if (phone && ![b.phone, b.user_id].includes(normalizeContact(phone))) throw notFound(`Booking ${b.ref}`);
 }
 
 async function paidSoFar(client, bookingId) {
@@ -201,7 +202,7 @@ async function createBooking(input) {
           decoration: input.decoration, idempotency_key: input.idempotency_key, notes: input.notes },
       }, cap.units, settings);
       await client.query(`UPDATE leads SET stage = 'booking_held', intent = $2 WHERE id = $1`, [lead.id, req.kind]);
-      const full = { ...b, phone: lead.phone, name: lead.name };
+      const full = { ...b, phone: lead.phone, user_id: lead.user_id, username: lead.username, name: lead.name };
       return { created: true, booking: publicBooking(full), summary_for_customer: holdText(full, settings) };
     });
   } catch (err) {
@@ -227,9 +228,9 @@ async function findBookings(phone, status) {
   const lead = await getLeadByPhone(pool, phone);
   if (!lead) return [];
   const { rows } = await pool.query(
-    `SELECT b.*, $2::text AS phone FROM bookings b
+    `SELECT b.*, $2::text AS phone, $4::text AS user_id FROM bookings b
       WHERE lead_id = $1 AND reschedule_of IS NULL AND ($3::text IS NULL OR status = $3)
-      ORDER BY delivery_at DESC`, [lead.id, lead.phone, status || null]);
+      ORDER BY delivery_at DESC`, [lead.id, lead.phone, status || null, lead.user_id]);
   return rows.map((r) => publicBooking(normalizeBookingRow(r)));
 }
 
@@ -250,7 +251,7 @@ async function cancelBooking(ref, { phone, by }) {
     // Paid bookings are never cancelled by the bot: the owner talks to them
     if (b.status === 'confirmed' && by === 'customer') {
       const paid = await paidSoFar(client, b.id);
-      const lead = { id: b.lead_id, phone: b.phone, name: b.name };
+      const lead = { id: b.lead_id, phone: b.phone, user_id: b.user_id, username: b.username, name: b.name };
       const h = await createHandoff(client, {
         lead, reason: 'cancellation_paid', priority: 'urgent', bookingId: b.id,
         summary: `${b.ref} (${bookingWhen(b)}, paid ${rupees(paid)}) wants to cancel. Please call them. Send CANCEL ${b.ref} if it is cancelled.`,
@@ -271,7 +272,7 @@ async function cancelBooking(ref, { phone, by }) {
 
     const notifications = by === 'customer'
       ? [{ to: 'owner', text: `❌ ${b.ref} (${who(b)}, ${bookingWhen(b)}) was cancelled by the customer before payment.` }]
-      : [{ to: 'customer', phone: b.phone, text: `Your booking ${b.ref} (${bookingWhen(b)}) has been cancelled. We hope to see you again soon 🧡` }];
+      : [{ to: 'customer', phone: contactOf(b), text: `Your booking ${b.ref} (${bookingWhen(b)}) has been cancelled. We hope to see you again soon 🧡` }];
     return {
       cancelled: true, handed_off: false, booking: publicBooking({ ...b, status: 'cancelled' }),
       summary_for_customer: `Your booking ${b.ref} is cancelled.`,
@@ -292,7 +293,7 @@ async function claimPayment(ref, { phone, amount, note }) {
       throw new HttpError(409, 'NOT_PENDING', `${b.ref} is ${b.status}; no advance is pending`);
     }
     await client.query('UPDATE bookings SET payment_claimed_at = coalesce(payment_claimed_at, $2) WHERE id = $1', [b.id, clock.now()]);
-    const lead = { id: b.lead_id, phone: b.phone, name: b.name };
+    const lead = { id: b.lead_id, phone: b.phone, user_id: b.user_id, username: b.username, name: b.name };
     const amt = amount ? rupees(amount) : 'the advance';
     const h = await createHandoff(client, {
       lead, reason: 'payment_claim', bookingId: b.id, details: { amount: amount ?? null, note: note ?? null },
@@ -346,7 +347,7 @@ async function recordPayment(ref, { amount, method, kind }) {
       reply = `✅ ${b.ref} confirmed (${who(b)}, ${bookingWhen(b)}, ${bookingWhat(b)}). ${rupees(amount)} received${short}. Customer notified.`;
       const balanceWhen = b.kind === 'birthday' ? 'after the setup is installed' : 'on delivery';
       notifications.push({
-        to: 'customer', phone: b.phone,
+        to: 'customer', phone: contactOf(b),
         text: `🎉 Your advance of ${rupees(amount)} is received and booking ${b.ref} is confirmed for ${bookingWhen(b)}. Balance ${rupees(balance)} is payable ${balanceWhen}. See you soon! 🎮`,
       });
     } else {
@@ -392,7 +393,7 @@ async function daySchedule(client, date, { excludeIds = [] } = {}) {
   const from = istDateTime(date, '00:00');
   const to = istDateTime(addDays(date, 1), '00:00');
   const { rows } = await client.query(
-    `SELECT b.*, l.phone, l.name FROM bookings b JOIN leads l ON l.id = b.lead_id
+    `SELECT b.*, l.phone, l.user_id, l.username, l.name FROM bookings b JOIN leads l ON l.id = b.lead_id
       WHERE b.status IN ('held','confirmed') AND b.block_period && tstzrange($1, $2)
         AND NOT (b.id = ANY($3::bigint[]))
       ORDER BY lower(b.block_period)`, [from, to, excludeIds]);
@@ -499,7 +500,7 @@ async function requestReschedule(ref, { phone, ...input }) {
     }
 
     await createHandoff(client, {
-      lead: { id: b.lead_id, phone: b.phone, name: b.name }, reason: 'reschedule', bookingId: b.id,
+      lead: { id: b.lead_id, phone: b.phone, user_id: b.user_id, username: b.username, name: b.name }, reason: 'reschedule', bookingId: b.id,
       summary: lines.join('\n'), details: { requested: change, fits: ok, tentative_ref: tentative?.ref ?? null },
     });
     return {
@@ -560,7 +561,7 @@ async function moveBooking(ref, change) {
       ok: true,
       reply: `✅ ${b.ref} moved to ${bookingWhen(moved)} (${who(b)}). Customer notified.`,
       booking: publicBooking(moved),
-      notifications: [{ to: 'customer', phone: b.phone,
+      notifications: [{ to: 'customer', phone: contactOf(b),
         text: `✅ Your booking ${b.ref} has been moved to ${bookingWhen(moved)}. See you then! 🎮` }],
     };
   });
@@ -575,7 +576,7 @@ async function declineReschedule(ref) {
     return {
       ok: true,
       reply: `✅ Reschedule for ${b.ref} declined${rowCount ? ', held slot released' : ''}. ${b.ref} stays on ${bookingWhen(b)}.`,
-      notifications: [{ to: 'customer', phone: b.phone,
+      notifications: [{ to: 'customer', phone: contactOf(b),
         text: `About your reschedule request for ${b.ref}: that date doesn't work for us, sorry. Your booking stays on ${bookingWhen(b)}; our team will call you to discuss other dates.` }],
     };
   });

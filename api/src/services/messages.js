@@ -13,7 +13,8 @@ async function logMessage(input) {
       const dup = await client.query('SELECT 1 FROM messages WHERE wa_message_id = $1', [input.wa_message_id]);
       if (dup.rowCount) return { duplicate: true };
     }
-    const lead = await upsertLead(client, input.phone, { name: input.name });
+    const lead = await upsertLead(client, input.phone || input.user_id,
+      { name: input.name, user_id: input.user_id, username: input.username });
     const now = clock.now();
 
     const ins = await client.query(
@@ -44,7 +45,7 @@ async function logMessage(input) {
       is_new_lead: lead.inserted,
       bot_paused: l.bot_paused_at != null,
       opted_out: l.opted_out,
-      lead: { id: l.id, phone: l.phone, name: l.name, intent: l.intent, stage: l.stage },
+      lead: { id: l.id, phone: l.phone, user_id: l.user_id, username: l.username, name: l.name, intent: l.intent, stage: l.stage },
     };
   });
 }

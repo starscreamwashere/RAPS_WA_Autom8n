@@ -55,6 +55,7 @@ node scripts/e2e-wf1.mjs
 | echo → pause | the owner typing from the WhatsApp Business app pauses the bot for that customer and queues a note for the owner |
 | while paused | customer messages are logged, the bot stays quiet |
 | RESUME | the owner's `RESUME <phone>` hands the customer back to the bot |
+| WhatsApp username | a customer with no phone in the webhook (only a user ID) is answered by `recipient` and gets a lead |
 
 With WF2 published, the "bot paused" notes in the outbox reach the mock
 within 30 s: `curl localhost:4010/__sent`.

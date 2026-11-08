@@ -17,10 +17,8 @@ Updated each working session so a new session can pick up the thread.
    its own Tech Provider (business verification + App Review), then coexistence
    onboarding with `scripts/meta-onboard.mjs`. Owner's first step: phase 0 checks
    (who manages the number today, app version, no WhatsApp for Windows).
-2. **Usernames / business-scoped user IDs** (Meta says required): customers who adopt a
-   WhatsApp username can arrive without a phone number. Store `user_id` on leads,
-   accept messages without `from`, send with `recipient`. Also alert the owner on
-   `account_update` PARTNER_REMOVED (API link lost).
+2. **Owner alert on disconnection**: `account_update` with `PARTNER_REMOVED` means the
+   API link is gone (e.g. 14 days without the phone); WF1 ignores it today.
 3. **Hosting decision** (always-on machine or small VPS) and go-live. Must be live
    before phase 5 of the Meta runbook.
 4. **LLM quota before go-live**: Gemini free-tier limits are per model per day
@@ -28,6 +26,17 @@ Updated each working session so a new session can pick up the thread.
    runs of ~100 requests each). One customer message is 2–4 requests. Check the
    real Flash-Lite daily limit at https://ai.dev/rate-limit, then decide: enable
    billing on the key, or move to Claude Haiku.
+
+## WhatsApp usernames (done Nov 2026)
+- Customers are identified by a contact key: phone, or business-scoped user ID (BSUID)
+  when WhatsApp hides the phone. Migration `004_usernames.sql` adds `leads.user_id` and
+  `leads.username`; phone is now optional. The API's `phone` fields accept either.
+- A lead first known by user ID is merged into the phone's lead when a webhook carries
+  both (messages, bookings, handoffs and profile facts move over).
+- WF1 reads `from_user_id` / `to_user_id`; WF1 and WF2 send with `recipient` when there
+  is no phone. Owner sees `@username`; `RESUME @username` or `RESUME IN.…` work.
+- Tests: 57/57 API (5 new in `usernames.test.js`); e2e 9/9 including a username-only
+  customer, and WF2 delivering a booking confirmation by `recipient`.
 
 ## Meta setup runbook (written Nov 2026)
 - `docs/META_SETUP.md`, checked against Meta's developer docs (Nov 2026): routes,

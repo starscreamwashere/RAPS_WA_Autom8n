@@ -44,11 +44,11 @@ http.createServer(async (req, res) => {
       return reply(res, 500, { error: { message: 'mock failure', code: 1 } });
     }
     sent.push(entry);
-    console.log(`→ ${body.to} [${body.type}] ${body.text?.body ?? body.template?.name ?? ''}`.slice(0, 200));
+    console.log(`→ ${body.to ?? body.recipient} [${body.type}] ${body.text?.body ?? body.template?.name ?? ''}`.slice(0, 200));
     seq += 1;
     return reply(res, 200, {
       messaging_product: 'whatsapp',
-      contacts: [{ input: body.to, wa_id: body.to }],
+      contacts: [body.to ? { input: body.to, wa_id: body.to } : { user_id: body.recipient }],
       messages: [{ id: `wamid.mock.${seq}` }],
     });
   }
