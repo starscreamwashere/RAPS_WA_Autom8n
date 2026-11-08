@@ -97,20 +97,32 @@ async function callTool(name, args, ctx) {
   return r.status >= 400 ? { error: r.body.error || { status: r.status } } : r.body;
 }
 
+// Free-tier keys hit per-minute limits during a run: wait and retry when the
+// API says the wait is short; a used-up daily quota still fails.
+const MAX_WAIT_S = 90;
 async function gemini(contents, systemText) {
-  const res = await fetch(`${GEMINI_BASE}/models/${MODEL}:generateContent`, {
-    method: 'POST',
-    headers: { 'x-goog-api-key': GEMINI_KEY, 'content-type': 'application/json' },
-    body: JSON.stringify({
-      systemInstruction: { parts: [{ text: systemText }] },
-      contents,
-      tools: [{ functionDeclarations }],
-      generationConfig: { temperature: 0.2 },
-    }),
-  });
-  const json = await res.json().catch(() => ({}));
-  if (res.status !== 200) throw new Error(`Gemini ${res.status}: ${json.error?.message || 'error'}`);
-  return json.candidates?.[0]?.content || { role: 'model', parts: [] };
+  for (let attempt = 0; ; attempt++) {
+    const res = await fetch(`${GEMINI_BASE}/models/${MODEL}:generateContent`, {
+      method: 'POST',
+      headers: { 'x-goog-api-key': GEMINI_KEY, 'content-type': 'application/json' },
+      body: JSON.stringify({
+        systemInstruction: { parts: [{ text: systemText }] },
+        contents,
+        tools: [{ functionDeclarations }],
+        generationConfig: { temperature: 0.2 },
+      }),
+    });
+    const json = await res.json().catch(() => ({}));
+    if (res.status === 200) return json.candidates?.[0]?.content || { role: 'model', parts: [] };
+    const retry = (json.error?.details || []).find((d) => d.retryDelay)?.retryDelay;
+    const waitS = retry ? parseFloat(retry) + 1 : 30;
+    if ((res.status === 429 || res.status === 503) && waitS <= MAX_WAIT_S && attempt < 5) {
+      console.log(`   (Gemini ${res.status}, retrying in ${Math.round(waitS)}s)`);
+      await new Promise((r) => setTimeout(r, waitS * 1000));
+      continue;
+    }
+    throw new Error(`Gemini ${res.status}: ${json.error?.message || 'error'}`);
+  }
 }
 
 // One customer turn, exactly as WF1 runs it
