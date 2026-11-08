@@ -49,6 +49,8 @@ services:
       N8N_ENCRYPTION_KEY: ${N8N_ENCRYPTION_KEY}
       N8N_HOST: ${N8N_HOST}
       N8N_PROTOCOL: https
+      # Default is '::', which crashes n8n where Docker has IPv6 off
+      N8N_LISTEN_ADDRESS: 0.0.0.0
       WEBHOOK_URL: ${WEBHOOK_URL}
       GENERIC_TIMEZONE: ${TZ:-Asia/Kolkata}
       TZ: ${TZ:-Asia/Kolkata}

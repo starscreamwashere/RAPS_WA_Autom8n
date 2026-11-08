@@ -46,6 +46,10 @@ These cover pricing, service areas, holds and expiry, the parallel
 double-booking race, the shared controller stock, cancellations, reschedules,
 owner commands, reminder jobs and the digest.
 
+## End-to-end test of the WhatsApp workflow
+
+n8n + API + Postgres with a mock Graph API: see [`docs/E2E.md`](docs/E2E.md).
+
 ## Bot prompt and test conversations
 
 - `prompts/system.md`: the AI agent's instructions. WF1 fills in `{{NOW_IST}}`

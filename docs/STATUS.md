@@ -13,17 +13,29 @@ Updated each working session so a new session can pick up the thread.
   Imported successfully into n8n 2.46.6 (needs Node 24 to run outside Docker).
 
 ## Next
-1. **End-to-end test of WF1** in a local n8n with a mock Graph API: owner command,
-   customer message → agent → reply, echo → pause.
-2. **Meta setup runbook** (`docs/META_SETUP.md`): coexistence onboarding, permanent
+1. **Meta setup runbook** (`docs/META_SETUP.md`): coexistence onboarding, permanent
    System User token, webhook URL + verify token, templates `owner_alert` and
    `customer_update`.
-3. **Hosting decision** (always-on machine or small VPS) and go-live.
-4. **LLM quota before go-live**: Gemini free-tier limits are per model per day
+2. **Hosting decision** (always-on machine or small VPS) and go-live.
+3. **LLM quota before go-live**: Gemini free-tier limits are per model per day
    (Flash: ~20 requests/day, used up by one test run; Flash-Lite handled two full
    runs of ~100 requests each). One customer message is 2–4 requests. Check the
    real Flash-Lite daily limit at https://ai.dev/rate-limit, then decide: enable
    billing on the key, or move to Claude Haiku.
+
+## WF1 end-to-end test (done Nov 2026)
+- `docs/E2E.md`: real Postgres + API + n8n 2.46.6 (`docker-compose.e2e.yml`), Graph API
+  mocked by `scripts/mock-graph.mjs`, checks in `scripts/e2e-wf1.mjs`.
+- **8/8 pass**: verify handshake, forged signature ignored, owner command, customer
+  message → Gemini agent → reply sent and logged (₹2,750 from the rate card),
+  duplicate delivery, echo pauses the bot, quiet while paused, RESUME.
+- **Safety net** (`--ai-down`): holding reply + urgent owner handoff. WF2 delivered the
+  queued owner notes to the mock.
+- Fixed on the way: `GET /leads/:phone` without `?current=` dropped the bot's own
+  replies from `recent_messages` (NULL comparison); n8n now listens on 0.0.0.0
+  (`N8N_LISTEN_ADDRESS`), because its default `::` crashes where Docker has IPv6 off.
+- Known: when Gemini is unreachable (not just erroring), the AI node retries for about
+  3.5 minutes before the holding reply goes out.
 
 ## Gemini (done Nov 2026)
 - `LLM_MODELS=gemini-3.5-flash-lite,gemini-3.1-flash-lite` (main, fallback).

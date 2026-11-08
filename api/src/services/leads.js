@@ -66,7 +66,7 @@ async function leadProfile(phone, client = pool, { currentMessageId } = {}) {
     client.query(`SELECT id, reason, summary, created_at FROM handoffs WHERE lead_id = $1 AND status = 'open'`, [lead.id]),
     client.query(
       `SELECT direction, kind, body, created_at FROM messages
-        WHERE lead_id = $1 AND body IS NOT NULL AND wa_message_id IS DISTINCT FROM $2
+        WHERE lead_id = $1 AND body IS NOT NULL AND ($2::text IS NULL OR wa_message_id IS DISTINCT FROM $2)
         ORDER BY created_at DESC, id DESC LIMIT $3`, [lead.id, currentMessageId || null, HISTORY]),
   ]);
   const { inserted, ...clean } = lead;
