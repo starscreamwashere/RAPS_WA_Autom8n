@@ -13,15 +13,27 @@ Updated each working session so a new session can pick up the thread.
   Imported successfully into n8n 2.46.6 (needs Node 24 to run outside Docker).
 
 ## Next
-1. **Gemini** (key is saved as `GEMINI_API_KEY` on the RAPS_WA_Autom8n cloud environment):
-   `node scripts/gemini-models.mjs --probe` → set `LLM_MODELS`, then run the 18 test
-   conversations against a fresh database and tune `prompts/system.md` until they pass.
-2. **End-to-end test of WF1** in a local n8n with a mock Graph API: owner command,
+1. **End-to-end test of WF1** in a local n8n with a mock Graph API: owner command,
    customer message → agent → reply, echo → pause.
-3. **Meta setup runbook** (`docs/META_SETUP.md`): coexistence onboarding, permanent
+2. **Meta setup runbook** (`docs/META_SETUP.md`): coexistence onboarding, permanent
    System User token, webhook URL + verify token, templates `owner_alert` and
    `customer_update`.
-4. **Hosting decision** (always-on machine or small VPS) and go-live.
+3. **Hosting decision** (always-on machine or small VPS) and go-live.
+4. **LLM quota before go-live**: Gemini free-tier limits are per model per day
+   (Flash: ~20 requests/day, used up by one test run; Flash-Lite handled two full
+   runs of ~100 requests each). One customer message is 2–4 requests. Check the
+   real Flash-Lite daily limit at https://ai.dev/rate-limit, then decide: enable
+   billing on the key, or move to Claude Haiku.
+
+## Gemini (done Nov 2026)
+- `LLM_MODELS=gemini-3.5-flash-lite,gemini-3.1-flash-lite` (main, fallback).
+- Test conversations: **18/18 pass on both**, with no prompt changes.
+- gemini-2.5-flash is retired; gemini-3.8-flash (and 3.7, which shares its quota)
+  and gemini-3.5-flash work but have the ~20/day free limit.
+- `run-evals.mjs` now retries short rate limits, names the quota when one is used
+  up, and wraps list-shaped tool results (Gemini needs an object).
+- Running scripts in the cloud sandbox: plain `node` reaches Gemini; do not set
+  `NODE_USE_ENV_PROXY`.
 
 ## Open with the owner
 - UPI ID `vindyreddy3011@oksbi` is taken from his chats: confirm it may be sent with every hold.
