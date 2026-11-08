@@ -121,7 +121,8 @@ async function gemini(contents, systemText) {
       await new Promise((r) => setTimeout(r, waitS * 1000));
       continue;
     }
-    throw new Error(`Gemini ${res.status}: ${json.error?.message || 'error'}`);
+    const quota = (json.error?.details || []).flatMap((d) => d.violations || []).map((v) => v.quotaId).join(',');
+    throw new Error(`Gemini ${res.status}${quota ? ` [${quota}${retry ? `, retry in ${retry}` : ''}]` : ''}: ${(json.error?.message || 'error').split('\n')[0]}`);
   }
 }
 
