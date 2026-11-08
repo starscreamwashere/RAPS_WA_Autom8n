@@ -1,3 +1,10 @@
+# The bot: Postgres + API + n8n, plus ONE way of reaching n8n from the
+# internet, picked with COMPOSE_PROFILES in .env (see docs/DEPLOY.md):
+#   caddy   server with a public IP (Oracle, any VPS): HTTPS for BOT_DOMAIN
+#   tunnel  laptop/PC: Cloudflare Tunnel, no open ports
+#   ngrok   laptop/PC without DNS access: ngrok static domain as BOT_DOMAIN
+# Only Meta's webhook path is public. The n8n editor, the API and Postgres
+# listen on this machine only (use an SSH tunnel from elsewhere).
 name: raps-powerplay
 
 services:
@@ -32,7 +39,7 @@ services:
       postgres:
         condition: service_healthy
     ports:
-      - "${API_PORT:-3000}:3000"
+      - "127.0.0.1:${API_PORT:-3000}:3000"
     networks: [raps]
 
   n8n:
@@ -47,11 +54,13 @@ services:
       DB_POSTGRESDB_USER: ${POSTGRES_USER}
       DB_POSTGRESDB_PASSWORD: ${POSTGRES_PASSWORD}
       N8N_ENCRYPTION_KEY: ${N8N_ENCRYPTION_KEY}
-      N8N_HOST: ${N8N_HOST}
+      N8N_HOST: ${BOT_DOMAIN:-localhost}
       N8N_PROTOCOL: https
+      # Behind Caddy / the tunnel: trust one proxy for the client address
+      N8N_PROXY_HOPS: 1
       # Default is '::', which crashes n8n where Docker has IPv6 off
       N8N_LISTEN_ADDRESS: 0.0.0.0
-      WEBHOOK_URL: ${WEBHOOK_URL}
+      WEBHOOK_URL: https://${BOT_DOMAIN:-localhost}/
       GENERIC_TIMEZONE: ${TZ:-Asia/Kolkata}
       TZ: ${TZ:-Asia/Kolkata}
       # Reachable from workflows as {{$env.RAPS_API_URL}} / {{$env.RAPS_API_KEY}}
@@ -64,26 +73,57 @@ services:
       postgres:
         condition: service_healthy
     ports:
-      - "5678:5678"
+      - "127.0.0.1:5678:5678"
     volumes:
       - n8ndata:/home/node/.n8n
       - ./n8n/workflows:/workflows
     networks: [raps]
 
-  ngrok:
-    image: ngrok/ngrok:latest
+  # HTTPS front door: only /webhook/* reaches n8n, everything else is 404.
+  # On a server it answers on 80/443 for BOT_DOMAIN (free certificate);
+  # with the tunnel it is plain HTTP inside Docker (CADDY_SITE=:80).
+  caddy:
+    image: caddy:2.10-alpine
+    profiles: [caddy, tunnel]
     restart: unless-stopped
-    command: ["http", "--url=${NGROK_DOMAIN}", "n8n:5678"]
     environment:
-      NGROK_AUTHTOKEN: ${NGROK_AUTHTOKEN}
+      CADDY_SITE: ${CADDY_SITE:-${BOT_DOMAIN}}
+    ports:
+      - "${CADDY_BIND:-0.0.0.0}:80:80"
+      - "${CADDY_BIND:-0.0.0.0}:443:443"
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddydata:/data
+    depends_on: [n8n]
+    networks: [raps]
+
+  # Laptop/PC: outbound tunnel to Cloudflare; BOT_DOMAIN → http://caddy:80
+  cloudflared:
+    image: cloudflare/cloudflared:2026.10.0
+    profiles: [tunnel]
+    restart: unless-stopped
+    command: ["tunnel", "--no-autoupdate", "run"]
+    environment:
+      TUNNEL_TOKEN: ${CLOUDFLARE_TUNNEL_TOKEN:-}
+    depends_on: [caddy]
+    networks: [raps]
+
+  ngrok:
+    image: ngrok/ngrok:3
+    profiles: [ngrok]
+    restart: unless-stopped
+    command: ["http", "--url=${BOT_DOMAIN}", "n8n:5678"]
+    environment:
+      NGROK_AUTHTOKEN: ${NGROK_AUTHTOKEN:-}
     depends_on: [n8n]
     ports:
-      - "4040:4040"
+      - "127.0.0.1:4040:4040"
     networks: [raps]
 
 volumes:
   pgdata:
   n8ndata:
+  caddydata:
 
 networks:
   raps:

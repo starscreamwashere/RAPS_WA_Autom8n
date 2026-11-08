@@ -105,8 +105,8 @@ App Dashboard → **Use cases** → WhatsApp → *Customize* → **Tech Provider
 The bot must be running **before** onboarding, because the contact and history sync
 has to be started within 24 hours of it, and customer messages start arriving at once.
 
-1. Host the stack (`docker compose up -d`; hosting decision in `docs/STATUS.md`) with a
-   public HTTPS URL: `https://<NGROK_DOMAIN>` or your domain.
+1. Host the stack by following `docs/DEPLOY.md` (Oracle Cloud Always Free, or a
+   laptop as fallback). Its public HTTPS address is `https://bot.rapspowerplay.com`.
 2. `.env`: `WA_VERIFY_TOKEN` (any long random string), `WA_APP_SECRET` (phase 2),
    `OWNER_PHONE`, `BUSINESS_PHONE=919082201911`, `LLM_MODELS`, Gemini key in n8n
    (`docs/E2E.md` step 2 shows the import; in production use the n8n UI → Credentials).
@@ -118,7 +118,8 @@ has to be started within 24 hours of it, and customer messages start arriving at
    `curl -d "test from RAPS" https://ntfy.sh/raps-7f3k9q2m1x`.
 3. Import and **publish** the three workflows in n8n.
 4. App Dashboard → WhatsApp → **Configuration** → Webhook:
-   - Callback URL: `https://<NGROK_DOMAIN>/webhook/whatsapp`
+   - Callback URL: `https://bot.rapspowerplay.com/webhook/whatsapp` (or the ngrok domain
+     on the laptop-with-ngrok setup)
    - Verify token: the same `WA_VERIFY_TOKEN`
    - Click *Verify and save* (WF1 answers Meta's check).
 5. Subscribe these webhook fields:

@@ -13,17 +13,33 @@ Updated each working session so a new session can pick up the thread.
   Imported successfully into n8n 2.46.6 (needs Node 24 to run outside Docker).
 
 ## Next
-1. **Meta onboarding (owner + dev)**: follow `docs/META_SETUP.md`. Route A: RAPS becomes
-   its own Tech Provider (business verification + App Review), then coexistence
-   onboarding with `scripts/meta-onboard.mjs`. Owner's first step: phase 0 checks
-   (who manages the number today, app version, no WhatsApp for Windows).
-2. **Hosting decision** (always-on machine or small VPS) and go-live. Must be live
+1. **Deploy** (`docs/DEPLOY.md`): Oracle Cloud Always Free (owner signs up, home region
+   Mumbai/Hyderabad, upgrade to Pay As You Go against idle reclamation), DNS record
+   `bot` → server IP; laptop + Cloudflare Tunnel (or ngrok) as fallback. Must be live
    before phase 5 of the Meta runbook.
+2. **Meta onboarding (owner + dev)**: `docs/META_SETUP.md`. Owner's first step: phase 0
+   checks (who manages the number today, app version, no WhatsApp for Windows).
 3. **LLM quota before go-live**: Gemini free-tier limits are per model per day
    (Flash: ~20 requests/day, used up by one test run; Flash-Lite handled two full
    runs of ~100 requests each). One customer message is 2–4 requests. Check the
    real Flash-Lite daily limit at https://ai.dev/rate-limit, then decide: enable
    billing on the key, or move to Claude Haiku.
+
+## Hosting (decided Nov 2026)
+- Owner pays nothing: **Oracle Cloud Always Free** (ARM, 2 OCPU / 12 GB used of the
+  free 4 / 24), **laptop or PC** as fallback. Public address **bot.rapspowerplay.com**,
+  accounts in the owner's name. Measured: ~1 GB RAM idle (n8n ~800 MB).
+- `docker-compose.yml` profiles: `caddy` (server: automatic HTTPS), `tunnel` (laptop:
+  Cloudflare Tunnel), `ngrok`. Only `/webhook/*` is public; editor, API and Postgres
+  are bound to localhost. `deploy/Caddyfile`.
+- Scripts: `server-setup.sh` (Docker, Oracle firewall, time zone, nightly backup cron),
+  `n8n-add-gemini-key.sh`, `n8n-load-workflows.sh`, `backup.sh` (both databases,
+  14 days, optional rclone copy), `restore.sh`.
+- WF3 pings `HEARTBEAT_URL` every 15 min (healthchecks.io → ntfy) so a dead server
+  or switched-off laptop raises an alert.
+- Rehearsed here: caddy profile end to end (HTTPS, Meta verify, signed message
+  logged, editor/REST 404, HTTP→HTTPS), backup/restore round trip, firewall rules
+  against Oracle's defaults, Gemini key script.
 
 ## WhatsApp disconnection alert (done Nov 2026)
 - `POST /whatsapp/link-events` records Meta `account_update` webhooks (WF1) and a health
