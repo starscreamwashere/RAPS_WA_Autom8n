@@ -106,7 +106,7 @@
     },
     {
       "id": "rental-full-booking",
-      "about": "End-to-end rental: quote, area, date, hold. The reply carries the booking number and UPI ID",
+      "about": "End-to-end rental: quote, area, date, hold. The reply carries the booking number and UPI ID. The hold waits for the customer's yes",
       "name": "Rohan",
       "turns": [
         {
@@ -122,6 +122,9 @@
           "expect": {
             "tool_called": [
               "check_availability"
+            ],
+            "tool_not_called": [
+              "create_booking"
             ]
           }
         },

@@ -148,7 +148,7 @@
     },
     {
       "name": "create_booking",
-      "description": "Hold a slot for this customer after they agreed to the price and dates. Creates an unpaid HOLD (not a confirmed booking) and returns the booking number and summary_for_customer with the advance, UPI ID and hold time to relay. Birthday needs date, start_time and players or setups; rental needs start_date, days and controllers.",
+      "description": "Hold a slot for this customer. Only when their latest message clearly asks to book/hold or says yes to your offer to hold, and they know the price and dates; giving area or date is not agreement. Creates an unpaid HOLD (not a confirmed booking) and returns the booking number and summary_for_customer with the advance, UPI ID and hold time to relay. Birthday needs date, start_time and players or setups; rental needs start_date, days and controllers.",
       "http": {
         "method": "POST",
         "path": "/bookings",
