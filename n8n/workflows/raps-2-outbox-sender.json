@@ -58,7 +58,7 @@
       ],
       "parameters": {
         "mode": "runOnceForEachItem",
-        "jsCode": "// Free text inside the 24h window, otherwise the approved template with the\n// message flattened into its single body variable\nconst m = $input.item.json;\nconst payload = m.send_as === 'text'\n  ? { messaging_product: 'whatsapp', recipient_type: 'individual', to: m.phone, type: 'text', text: { preview_url: false, body: m.text } }\n  : { messaging_product: 'whatsapp', recipient_type: 'individual', to: m.phone, type: 'template',\n      template: { name: m.template, language: { code: $env.WA_TEMPLATE_LANG || 'en' },\n        components: [{ type: 'body', parameters: m.variables.map((v) => ({ type: 'text', text: String(v).slice(0, 1000) })) }] } };\nreturn { json: { id: m.id, payload } };"
+        "jsCode": "// Free text inside the 24h window, otherwise the approved template with the\n// message flattened into its single body variable\nconst m = $input.item.json;\n// The API gives \"to\" (phone) or, for a customer known only by their WhatsApp\n// user ID (usernames), \"user_id\", which Meta takes as \"recipient\"\nconst who = m.to ? { to: m.to } : { recipient: m.user_id || m.phone };\nconst payload = m.send_as === 'text'\n  ? { messaging_product: 'whatsapp', recipient_type: 'individual', ...who, type: 'text', text: { preview_url: false, body: m.text } }\n  : { messaging_product: 'whatsapp', recipient_type: 'individual', ...who, type: 'template',\n      template: { name: m.template, language: { code: $env.WA_TEMPLATE_LANG || 'en' },\n        components: [{ type: 'body', parameters: m.variables.map((v) => ({ type: 'text', text: String(v).slice(0, 1000) })) }] } };\nreturn { json: { id: m.id, payload } };"
       }
     },
     {
@@ -72,7 +72,7 @@
       ],
       "parameters": {
         "method": "POST",
-        "url": "={{ ($env.GRAPH_API_BASE || \"https://graph.facebook.com/v21.0\") + \"/\" + String($env.WA_PHONE_NUMBER_ID).trim() + \"/messages\" }}",
+        "url": "={{ ($env.GRAPH_API_BASE || \"https://graph.facebook.com/v27.0\") + \"/\" + String($env.WA_PHONE_NUMBER_ID).trim() + \"/messages\" }}",
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [

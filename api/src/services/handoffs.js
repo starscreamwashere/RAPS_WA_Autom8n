@@ -62,7 +62,7 @@ async function resolveHandoff(id, client = pool) {
 
 async function listHandoffs(status = 'open', client = pool) {
   const { rows } = await client.query(
-    `SELECT h.*, l.phone, l.name FROM handoffs h JOIN leads l ON l.id = h.lead_id
+    `SELECT h.*, l.phone, l.user_id, l.username, l.name FROM handoffs h JOIN leads l ON l.id = h.lead_id
       WHERE h.status = $1 ORDER BY h.created_at`, [status]);
   return rows;
 }

@@ -13,15 +13,73 @@ Updated each working session so a new session can pick up the thread.
   Imported successfully into n8n 2.46.6 (needs Node 24 to run outside Docker).
 
 ## Next
-1. **Gemini** (key is saved as `GEMINI_API_KEY` on the RAPS_WA_Autom8n cloud environment):
-   `node scripts/gemini-models.mjs --probe` → set `LLM_MODELS`, then run the 18 test
-   conversations against a fresh database and tune `prompts/system.md` until they pass.
-2. **End-to-end test of WF1** in a local n8n with a mock Graph API: owner command,
-   customer message → agent → reply, echo → pause.
-3. **Meta setup runbook** (`docs/META_SETUP.md`): coexistence onboarding, permanent
-   System User token, webhook URL + verify token, templates `owner_alert` and
-   `customer_update`.
-4. **Hosting decision** (always-on machine or small VPS) and go-live.
+1. **Meta onboarding (owner + dev)**: follow `docs/META_SETUP.md`. Route A: RAPS becomes
+   its own Tech Provider (business verification + App Review), then coexistence
+   onboarding with `scripts/meta-onboard.mjs`. Owner's first step: phase 0 checks
+   (who manages the number today, app version, no WhatsApp for Windows).
+2. **Hosting decision** (always-on machine or small VPS) and go-live. Must be live
+   before phase 5 of the Meta runbook.
+3. **LLM quota before go-live**: Gemini free-tier limits are per model per day
+   (Flash: ~20 requests/day, used up by one test run; Flash-Lite handled two full
+   runs of ~100 requests each). One customer message is 2–4 requests. Check the
+   real Flash-Lite daily limit at https://ai.dev/rate-limit, then decide: enable
+   billing on the key, or move to Claude Haiku.
+
+## WhatsApp disconnection alert (done Nov 2026)
+- `POST /whatsapp/link-events` records Meta `account_update` webhooks (WF1) and a health
+  check every 3 hours (WF3: Meta's `platform_type` for the number; catches missed
+  webhooks and expired tokens). State lives in `settings.whatsapp_link`; history in
+  `whatsapp_link_events` (migration 005). `GET /whatsapp/link` shows both.
+- The owner is alerted once per change (restrictions: every new one), in plain words
+  with the fix: by WhatsApp (outbox) and by push to `ALERT_PUSH_URL` (ntfy), because a
+  disconnected number cannot send WhatsApp. The digest leads with it until fixed.
+- Tests: 61/61 API (4 new in `whatsapp-link.test.js`); e2e 10/10 (push on
+  PARTNER_REMOVED); WF3's health-check nodes run in n8n against the mock: expired
+  token → alert, repeat → quiet, Meta 5xx → no verdict, healthy → recovery push.
+
+## WhatsApp usernames (done Nov 2026)
+- Customers are identified by a contact key: phone, or business-scoped user ID (BSUID)
+  when WhatsApp hides the phone. Migration `004_usernames.sql` adds `leads.user_id` and
+  `leads.username`; phone is now optional. The API's `phone` fields accept either.
+- A lead first known by user ID is merged into the phone's lead when a webhook carries
+  both (messages, bookings, handoffs and profile facts move over).
+- WF1 reads `from_user_id` / `to_user_id`; WF1 and WF2 send with `recipient` when there
+  is no phone. Owner sees `@username`; `RESUME @username` or `RESUME IN.…` work.
+- Tests: 57/57 API (5 new in `usernames.test.js`); e2e 9/9 including a username-only
+  customer, and WF2 delivering a booking confirmation by `recipient`.
+
+## Meta setup runbook (written Nov 2026)
+- `docs/META_SETUP.md`, checked against Meta's developer docs (Nov 2026): routes,
+  phases 0–8, templates `owner_alert` / `customer_update`, System User token, costs.
+- Meta facts that shaped it: coexistence needs Embedded Signup (Tech Provider or
+  Solution Partner); 20 msg/s; no WhatsApp for Windows; phone must open WhatsApp every
+  ~14 days; contacts/history sync within 24 h; since 1 Oct 2026 bot replies are free
+  only for the first 1,000 a month per number.
+- Graph API default moved from v21.0 to v27.0 (workflows regenerated).
+
+## WF1 end-to-end test (done Nov 2026)
+- `docs/E2E.md`: real Postgres + API + n8n 2.46.6 (`docker-compose.e2e.yml`), Graph API
+  mocked by `scripts/mock-graph.mjs`, checks in `scripts/e2e-wf1.mjs`.
+- **8/8 pass**: verify handshake, forged signature ignored, owner command, customer
+  message → Gemini agent → reply sent and logged (₹2,750 from the rate card),
+  duplicate delivery, echo pauses the bot, quiet while paused, RESUME.
+- **Safety net** (`--ai-down`): holding reply + urgent owner handoff. WF2 delivered the
+  queued owner notes to the mock.
+- Fixed on the way: `GET /leads/:phone` without `?current=` dropped the bot's own
+  replies from `recent_messages` (NULL comparison); n8n now listens on 0.0.0.0
+  (`N8N_LISTEN_ADDRESS`), because its default `::` crashes where Docker has IPv6 off.
+- Known: when Gemini is unreachable (not just erroring), the AI node retries for about
+  3.5 minutes before the holding reply goes out.
+
+## Gemini (done Nov 2026)
+- `LLM_MODELS=gemini-3.5-flash-lite,gemini-3.1-flash-lite` (main, fallback).
+- Test conversations: **18/18 pass on both**, with no prompt changes.
+- gemini-2.5-flash is retired; gemini-3.8-flash (and 3.7, which shares its quota)
+  and gemini-3.5-flash work but have the ~20/day free limit.
+- `run-evals.mjs` now retries short rate limits, names the quota when one is used
+  up, and wraps list-shaped tool results (Gemini needs an object).
+- Running scripts in the cloud sandbox: plain `node` reaches Gemini; do not set
+  `NODE_USE_ENV_PROXY`.
 
 ## Open with the owner
 - UPI ID `vindyreddy3011@oksbi` is taken from his chats: confirm it may be sent with every hold.

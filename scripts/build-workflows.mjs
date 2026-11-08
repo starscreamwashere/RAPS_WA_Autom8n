@@ -44,7 +44,7 @@ function apiCall(name, method, urlExpr, body, position, extra = {}) {
 }
 
 // A WhatsApp Cloud API send. `payload` is a JS expression for the message body.
-const GRAPH_URL = '={{ ($env.GRAPH_API_BASE || "https://graph.facebook.com/v21.0") + "/" + String($env.WA_PHONE_NUMBER_ID).trim() + "/messages" }}';
+const GRAPH_URL = '={{ ($env.GRAPH_API_BASE || "https://graph.facebook.com/v27.0") + "/" + String($env.WA_PHONE_NUMBER_ID).trim() + "/messages" }}';
 function whatsappSend(name, payload, position, extra = {}) {
   return node(name, 'n8n-nodes-base.httpRequest', 4.5, {
     method: 'POST',
@@ -57,7 +57,32 @@ function whatsappSend(name, payload, position, extra = {}) {
     options: { timeout: 20000 },
   }, position, extra);
 }
-const textMessage = (to, text) => `{ messaging_product: "whatsapp", recipient_type: "individual", to: ${to}, type: "text", text: { preview_url: false, body: ${text} } }`;
+// A customer with a WhatsApp username may have no phone in the webhook; then
+// the contact key is their business-scoped user ID ("IN.…"), sent as recipient
+const address = (key) => `...(/^[A-Z]{2}\\./.test(String(${key})) ? { recipient: ${key} } : { to: ${key} })`;
+const textMessage = (to, text) => `{ messaging_product: "whatsapp", recipient_type: "individual", ${address(to)}, type: "text", text: { preview_url: false, body: ${text} } }`;
+
+// Out-of-band alert for when WhatsApp itself is the thing that broke: a plain-
+// text POST to ALERT_PUSH_URL (an ntfy.sh topic URL shows it as a phone push).
+function pushAlert(name, textExpr, position) {
+  return node(name, 'n8n-nodes-base.httpRequest', 4.5, {
+    method: 'POST',
+    url: '={{ $env.ALERT_PUSH_URL }}',
+    sendHeaders: true,
+    headerParameters: { parameters: [
+      { name: 'Title', value: 'RAPS WhatsApp bot' },
+      { name: 'Priority', value: 'urgent' },
+      { name: 'Tags', value: 'rotating_light' },
+    ] },
+    sendBody: true,
+    contentType: 'raw',
+    rawContentType: 'text/plain; charset=utf-8',
+    body: `={{ ${textExpr} }}`,
+    options: { timeout: 20000 },
+  }, position, { onError: 'continueRegularOutput' });
+}
+const recordLinkEvent = (name, body, position) => apiCall(name, 'POST', '"/whatsapp/link-events"', body, position);
+const pushIfAlert = (name, position) => route(name, 2, '($json.alert && $env.ALERT_PUSH_URL) ? 0 : 1', position);
 
 function code(name, js, position, mode = 'runOnceForAllItems') {
   return node(name, 'n8n-nodes-base.code', 2, { mode, jsCode: js.trim() }, position);
@@ -140,25 +165,52 @@ const out = [];
 for (const entry of body.entry || []) {
   for (const change of entry.changes || []) {
     const v = change.value || {};
-    const names = Object.fromEntries((v.contacts || []).map((c) => [c.wa_id, c.profile?.name]));
+    // With WhatsApp usernames the phone (from / wa_id) can be missing; the
+    // business-scoped user ID (from_user_id / user_id) is always there.
+    // "phone" below is the contact key: the phone if known, else the user ID.
+    const contacts = v.contacts || [];
+    const contactFor = (phone, userId) => contacts.find((c) => (phone && c.wa_id === phone) || (userId && c.user_id === userId))
+      || (contacts.length === 1 ? contacts[0] : {});
     for (const m of v.messages || []) {
       const text = describe(m);
       if (text == null) continue;
-      const from = digits(m.from);
+      const c = contactFor(m.from, m.from_user_id);
+      const from = digits(m.from || c.wa_id);
+      const userId = m.from_user_id || c.user_id || null;
+      if (!from && !userId) continue;
       out.push({ json: {
-        kind: from === owner ? 'owner' : 'customer',
-        phone: from,
-        name: names[m.from] || null,
+        kind: from && from === owner ? 'owner' : 'customer',
+        phone: from || userId,
+        user_id: userId,
+        username: c.profile?.username || null,
+        name: c.profile?.name || null,
         wa_message_id: m.id,
         message_type: m.type,
         text: String(text).trim(),
         referral: m.referral || null,
       } });
     }
+    // Meta telling us the number was disconnected, restricted, banned, …
+    if (change.field === 'account_update' && v.event) {
+      out.push({ json: {
+        kind: 'account',
+        event: v.event,
+        reason: v.disconnection_info?.reason || undefined,
+        ban_state: v.ban_info?.waba_ban_state || undefined,
+        restriction_type: (v.restriction_info || []).map((r) => r.restriction_type).filter(Boolean).join(', ') || undefined,
+        violation_type: v.violation_info?.violation_type || undefined,
+        details: v,
+      } });
+    }
     for (const m of v.message_echoes || []) {
       const text = describe(m);
       if (text == null) continue;
-      out.push({ json: { kind: 'echo', phone: digits(m.to), wa_message_id: m.id, message_type: m.type, text: String(text).trim() } });
+      const c = contactFor(m.to, m.to_user_id);
+      const to = digits(m.to || c.wa_id);
+      const userId = m.to_user_id || c.user_id || null;
+      if (!to && !userId) continue;
+      out.push({ json: { kind: 'echo', phone: to || userId, user_id: userId, username: c.profile?.username || null,
+        wa_message_id: m.id, message_type: m.type, text: String(text).trim() } });
     }
   }
 }
@@ -281,7 +333,15 @@ function buildInbound() {
     node('WhatsApp inbound (POST)', 'n8n-nodes-base.webhook', 2.2,
       { httpMethod: 'POST', path: 'whatsapp', responseMode: 'onReceived', options: { rawBody: true } }, [0, 300], { webhookId: 'raps-whatsapp-inbound' }),
     code('Parse Meta payload', PARSE_JS, [220, 300]),
-    route('Who is it?', 3, '({ owner: 0, echo: 1, customer: 2 })[$json.kind] ?? 2', [440, 300]),
+    route('Who is it?', 4, '({ owner: 0, echo: 1, customer: 2, account: 3 })[$json.kind] ?? 2', [440, 300]),
+
+    // Meta: the number was disconnected / restricted. Alert by WhatsApp (API
+    // outbox) and by push, since a disconnected number cannot send WhatsApp
+    recordLinkEvent('Record account event',
+      '{ source: "webhook", event: $json.event, reason: $json.reason, ban_state: $json.ban_state, restriction_type: $json.restriction_type, violation_type: $json.violation_type, details: $json.details }',
+      [700, -120]),
+    pushIfAlert('Alert needed?', [920, -120]),
+    pushAlert('Push alert to owner', '$json.text', [1140, -140]),
 
     // Owner: deterministic commands, one-line reply
     apiCall('Run owner command', 'POST', '"/owner/command"', '{ phone: $json.phone, text: $json.text }', [700, 80]),
@@ -289,12 +349,12 @@ function buildInbound() {
 
     // Owner typed to a customer from the Business app: log it, bot steps back
     apiCall('Log owner app message', 'POST', '"/messages"',
-      '{ phone: $json.phone, direction: "out", kind: "owner_app", wa_message_id: $json.wa_message_id, body: $json.text }', [700, 280]),
+      '{ phone: $json.phone, user_id: $json.user_id || undefined, username: $json.username || undefined, direction: "out", kind: "owner_app", wa_message_id: $json.wa_message_id, body: $json.text }', [700, 280]),
     apiCall('Pause bot for customer', 'POST', '"/leads/" + $(\'Parse Meta payload\').item.json.phone + "/pause"', null, [920, 280]),
 
     // Customer: log, then reply unless duplicate / opted out / owner took over
     apiCall('Log inbound', 'POST', '"/messages"',
-      '{ phone: $json.phone, direction: "in", wa_message_id: $json.wa_message_id, kind: $json.message_type, body: $json.text, name: $json.name || undefined, referral: $json.referral || undefined }',
+      '{ phone: $json.phone, user_id: $json.user_id || undefined, username: $json.username || undefined, direction: "in", wa_message_id: $json.wa_message_id, kind: $json.message_type, body: $json.text, name: $json.name || undefined, referral: $json.referral || undefined }',
       [700, 500]),
     route('Should reply?', 2, '(!$json.duplicate && !$json.opted_out && !$json.bot_paused) ? 0 : 1', [920, 500]),
     apiCall('Load profile', 'GET',
@@ -328,6 +388,9 @@ function buildInbound() {
   connect(c, 'Who is it?', 'Run owner command', { output: 0 });
   connect(c, 'Who is it?', 'Log owner app message', { output: 1 });
   connect(c, 'Who is it?', 'Log inbound', { output: 2 });
+  connect(c, 'Who is it?', 'Record account event', { output: 3 });
+  connect(c, 'Record account event', 'Alert needed?');
+  connect(c, 'Alert needed?', 'Push alert to owner', { output: 0 });
   connect(c, 'Run owner command', 'Reply to owner');
   connect(c, 'Log owner app message', 'Pause bot for customer');
   connect(c, 'Log inbound', 'Should reply?');
@@ -353,9 +416,12 @@ const OUTBOX_PAYLOAD_JS = String.raw`
 // Free text inside the 24h window, otherwise the approved template with the
 // message flattened into its single body variable
 const m = $input.item.json;
+// The API gives "to" (phone) or, for a customer known only by their WhatsApp
+// user ID (usernames), "user_id", which Meta takes as "recipient"
+const who = m.to ? { to: m.to } : { recipient: m.user_id || m.phone };
 const payload = m.send_as === 'text'
-  ? { messaging_product: 'whatsapp', recipient_type: 'individual', to: m.phone, type: 'text', text: { preview_url: false, body: m.text } }
-  : { messaging_product: 'whatsapp', recipient_type: 'individual', to: m.phone, type: 'template',
+  ? { messaging_product: 'whatsapp', recipient_type: 'individual', ...who, type: 'text', text: { preview_url: false, body: m.text } }
+  : { messaging_product: 'whatsapp', recipient_type: 'individual', ...who, type: 'template',
       template: { name: m.template, language: { code: $env.WA_TEMPLATE_LANG || 'en' },
         components: [{ type: 'body', parameters: m.variables.map((v) => ({ type: 'text', text: String(v).slice(0, 1000) })) }] } };
 return { json: { id: m.id, payload } };
@@ -384,6 +450,28 @@ function buildOutbox() {
 
 // ---- WF3: scheduled jobs ---------------------------------------------------------
 
+const HEALTH_JS = String.raw`
+// Meta's answer about the business number → HEALTH_OK / HEALTH_ERROR.
+// No answer at all (network trouble, Meta 5xx, not configured yet) is not a
+// verdict: nothing is recorded and the next check tries again.
+if (!String($env.WA_PHONE_NUMBER_ID || '').trim()) return [];
+const out = [];
+for (const item of $input.all()) {
+  const status = item.json.statusCode;
+  const body = item.json.body || {};
+  if (!status || status >= 500) continue;
+  if (status === 200 && body.platform_type === 'CLOUD_API') {
+    out.push({ json: { event: 'HEALTH_OK', details: body } });
+    continue;
+  }
+  const error = body.error
+    ? (body.error.message || 'error') + ' (code ' + body.error.code + ')'
+    : 'the number is not on the Cloud API (platform: ' + (body.platform_type || 'unknown') + ')';
+  out.push({ json: { event: 'HEALTH_ERROR', error: error.slice(0, 400), details: body } });
+}
+return out;
+`;
+
 function buildJobs() {
   ids = 0;
   const c = {};
@@ -396,11 +484,35 @@ function buildJobs() {
     node('Every day 21:00', 'n8n-nodes-base.scheduleTrigger', 1.2,
       { rule: { interval: [{ field: 'cronExpression', expression: '0 21 * * *' }] } }, [0, 220]),
     apiCall('Queue owner digest', 'POST', '"/reports/digest/send"', null, [220, 220]),
+
+    // Is the number still on the Cloud API? Catches a missed disconnection
+    // webhook and an expired or wrong access token.
+    node('Every 3 hours', 'n8n-nodes-base.scheduleTrigger', 1.2,
+      { rule: { interval: [{ field: 'hours', hoursInterval: 3 }] } }, [0, 440]),
+    node('Ask Meta about the number', 'n8n-nodes-base.httpRequest', 4.5, {
+      method: 'GET',
+      url: '={{ ($env.GRAPH_API_BASE || "https://graph.facebook.com/v27.0") + "/" + String($env.WA_PHONE_NUMBER_ID).trim() }}',
+      sendQuery: true,
+      queryParameters: { parameters: [{ name: 'fields', value: 'platform_type,is_on_biz_app,status,quality_rating' }] },
+      sendHeaders: true,
+      headerParameters: { parameters: [{ name: 'Authorization', value: '={{ "Bearer " + String($env.WA_ACCESS_TOKEN).trim() }}' }] },
+      options: { timeout: 20000, response: { response: { fullResponse: true, neverError: true } } },
+    }, [220, 440], { onError: 'continueRegularOutput' }),
+    code('Read the answer', HEALTH_JS, [440, 440]),
+    recordLinkEvent('Record health check',
+      '{ source: "health_check", event: $json.event, error: $json.error, details: $json.details }', [660, 440]),
+    pushIfAlert('Alert needed?', [880, 440]),
+    pushAlert('Push alert to owner', '$json.text', [1100, 420]),
   ];
   connect(c, 'Every 15 minutes', 'Expire lapsed holds');
   connect(c, 'Expire lapsed holds', 'Queue reminders');
   connect(c, 'Queue reminders', 'Queue review requests');
   connect(c, 'Every day 21:00', 'Queue owner digest');
+  connect(c, 'Every 3 hours', 'Ask Meta about the number');
+  connect(c, 'Ask Meta about the number', 'Read the answer');
+  connect(c, 'Read the answer', 'Record health check');
+  connect(c, 'Record health check', 'Alert needed?');
+  connect(c, 'Alert needed?', 'Push alert to owner', { output: 0 });
   return workflow('RAPS · 3 · Reminders and digest', nodes, c);
 }
 

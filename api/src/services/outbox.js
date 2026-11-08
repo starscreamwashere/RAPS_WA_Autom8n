@@ -1,6 +1,7 @@
 const { pool, withTx } = require('../db');
 const clock = require('../clock');
 const config = require('../config');
+const { isUserId } = require('../phone');
 const { notFound } = require('../errors');
 const { getSettings, setSetting } = require('../settings');
 
@@ -10,6 +11,12 @@ const WINDOW_MS = 24 * 3600 * 1000;
 // Templates for business-initiated messages (outside the 24h window). Each
 // has one body variable holding the flattened text; see docs/META_SETUP.md.
 const TEMPLATE = { owner: 'owner_alert', customer: 'customer_update' };
+
+function addressOf(o) {
+  if (o.recipient === 'owner') return { to: o.phone, user_id: null };
+  const phone = o.lead_phone || (isUserId(o.phone) ? null : o.phone);
+  return { to: phone, user_id: phone ? null : (o.lead_user_id || o.phone) };
+}
 
 const flatten = (text) => text.replace(/\s*\n+\s*/g, ' · ').trim();
 
@@ -36,8 +43,8 @@ async function pending(limit = 50) {
   const settings = await getSettings();
   const now = clock.now().getTime();
   const { rows } = await pool.query(
-    `SELECT o.*, l.last_inbound_at
-       FROM outbox o LEFT JOIN leads l ON l.phone = o.phone
+    `SELECT o.*, l.last_inbound_at, l.phone AS lead_phone, l.user_id AS lead_user_id
+       FROM outbox o LEFT JOIN leads l ON o.phone IN (l.phone, l.user_id)
       WHERE o.status = 'pending' ORDER BY o.id LIMIT $1`, [limit]);
   return rows.map((o) => {
     const lastInbound = o.recipient === 'owner' ? settings.owner_last_inbound_at : o.last_inbound_at;
@@ -46,6 +53,9 @@ async function pending(limit = 50) {
       id: o.id,
       recipient: o.recipient,
       phone: o.phone,
+      // Who to address on WhatsApp: the phone when known (it may have been
+      // learned after this was queued), otherwise the business-scoped user ID
+      ...addressOf(o),
       send_as: inWindow ? 'text' : 'template',
       text: o.text,
       template: inWindow ? null : TEMPLATE[o.recipient],

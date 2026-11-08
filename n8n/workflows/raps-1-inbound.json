@@ -79,7 +79,7 @@
       ],
       "parameters": {
         "mode": "runOnceForAllItems",
-        "jsCode": "// Verifies Meta's signature, then turns the webhook payload into one item per\n// message: customer messages, owner commands, and echoes of messages the\n// owner typed from the WhatsApp Business app (coexistence).\nconst crypto = require('crypto');\nconst item = $input.first();\nconst body = item.json.body || {};\n\nconst secret = String($env.WA_APP_SECRET || '').trim();\nif (secret) {\n  const raw = Buffer.from(item.binary?.data?.data || '', 'base64');\n  const given = String(item.json.headers['x-hub-signature-256'] || '');\n  const expected = 'sha256=' + crypto.createHmac('sha256', secret).update(raw).digest('hex');\n  if (given.length !== expected.length || !crypto.timingSafeEqual(Buffer.from(given), Buffer.from(expected))) {\n    return []; // not from Meta: ignore\n  }\n}\n\nconst digits = (p) => {\n  const d = String(p || '').replace(/\\D/g, '');\n  return d.length === 10 ? '91' + d : d;\n};\nconst owner = digits($env.OWNER_PHONE);\n\n// WhatsApp message → the text the bot sees ([image], [voice note], …)\nfunction describe(m) {\n  switch (m.type) {\n    case 'text': return m.text?.body;\n    case 'button': return m.button?.text;\n    case 'interactive': return m.interactive?.button_reply?.title || m.interactive?.list_reply?.title;\n    case 'image': return '[image]' + (m.image?.caption ? ' ' + m.image.caption : '');\n    case 'video': return '[video]' + (m.video?.caption ? ' ' + m.video.caption : '');\n    case 'audio': return '[voice note]';\n    case 'document': return '[document] ' + (m.document?.filename || '');\n    case 'sticker': return '[sticker]';\n    case 'location': {\n      const l = m.location || {};\n      return '[location: ' + [l.name, l.address].filter(Boolean).join(', ') + ' (' + l.latitude + ',' + l.longitude + ')]';\n    }\n    case 'contacts': return '[contact card]';\n    case 'reaction': return null; // reactions need no reply\n    default: return '[unsupported message]';\n  }\n}\n\nconst out = [];\nfor (const entry of body.entry || []) {\n  for (const change of entry.changes || []) {\n    const v = change.value || {};\n    const names = Object.fromEntries((v.contacts || []).map((c) => [c.wa_id, c.profile?.name]));\n    for (const m of v.messages || []) {\n      const text = describe(m);\n      if (text == null) continue;\n      const from = digits(m.from);\n      out.push({ json: {\n        kind: from === owner ? 'owner' : 'customer',\n        phone: from,\n        name: names[m.from] || null,\n        wa_message_id: m.id,\n        message_type: m.type,\n        text: String(text).trim(),\n        referral: m.referral || null,\n      } });\n    }\n    for (const m of v.message_echoes || []) {\n      const text = describe(m);\n      if (text == null) continue;\n      out.push({ json: { kind: 'echo', phone: digits(m.to), wa_message_id: m.id, message_type: m.type, text: String(text).trim() } });\n    }\n  }\n}\nreturn out;"
+        "jsCode": "// Verifies Meta's signature, then turns the webhook payload into one item per\n// message: customer messages, owner commands, and echoes of messages the\n// owner typed from the WhatsApp Business app (coexistence).\nconst crypto = require('crypto');\nconst item = $input.first();\nconst body = item.json.body || {};\n\nconst secret = String($env.WA_APP_SECRET || '').trim();\nif (secret) {\n  const raw = Buffer.from(item.binary?.data?.data || '', 'base64');\n  const given = String(item.json.headers['x-hub-signature-256'] || '');\n  const expected = 'sha256=' + crypto.createHmac('sha256', secret).update(raw).digest('hex');\n  if (given.length !== expected.length || !crypto.timingSafeEqual(Buffer.from(given), Buffer.from(expected))) {\n    return []; // not from Meta: ignore\n  }\n}\n\nconst digits = (p) => {\n  const d = String(p || '').replace(/\\D/g, '');\n  return d.length === 10 ? '91' + d : d;\n};\nconst owner = digits($env.OWNER_PHONE);\n\n// WhatsApp message → the text the bot sees ([image], [voice note], …)\nfunction describe(m) {\n  switch (m.type) {\n    case 'text': return m.text?.body;\n    case 'button': return m.button?.text;\n    case 'interactive': return m.interactive?.button_reply?.title || m.interactive?.list_reply?.title;\n    case 'image': return '[image]' + (m.image?.caption ? ' ' + m.image.caption : '');\n    case 'video': return '[video]' + (m.video?.caption ? ' ' + m.video.caption : '');\n    case 'audio': return '[voice note]';\n    case 'document': return '[document] ' + (m.document?.filename || '');\n    case 'sticker': return '[sticker]';\n    case 'location': {\n      const l = m.location || {};\n      return '[location: ' + [l.name, l.address].filter(Boolean).join(', ') + ' (' + l.latitude + ',' + l.longitude + ')]';\n    }\n    case 'contacts': return '[contact card]';\n    case 'reaction': return null; // reactions need no reply\n    default: return '[unsupported message]';\n  }\n}\n\nconst out = [];\nfor (const entry of body.entry || []) {\n  for (const change of entry.changes || []) {\n    const v = change.value || {};\n    // With WhatsApp usernames the phone (from / wa_id) can be missing; the\n    // business-scoped user ID (from_user_id / user_id) is always there.\n    // \"phone\" below is the contact key: the phone if known, else the user ID.\n    const contacts = v.contacts || [];\n    const contactFor = (phone, userId) => contacts.find((c) => (phone && c.wa_id === phone) || (userId && c.user_id === userId))\n      || (contacts.length === 1 ? contacts[0] : {});\n    for (const m of v.messages || []) {\n      const text = describe(m);\n      if (text == null) continue;\n      const c = contactFor(m.from, m.from_user_id);\n      const from = digits(m.from || c.wa_id);\n      const userId = m.from_user_id || c.user_id || null;\n      if (!from && !userId) continue;\n      out.push({ json: {\n        kind: from && from === owner ? 'owner' : 'customer',\n        phone: from || userId,\n        user_id: userId,\n        username: c.profile?.username || null,\n        name: c.profile?.name || null,\n        wa_message_id: m.id,\n        message_type: m.type,\n        text: String(text).trim(),\n        referral: m.referral || null,\n      } });\n    }\n    // Meta telling us the number was disconnected, restricted, banned, …\n    if (change.field === 'account_update' && v.event) {\n      out.push({ json: {\n        kind: 'account',\n        event: v.event,\n        reason: v.disconnection_info?.reason || undefined,\n        ban_state: v.ban_info?.waba_ban_state || undefined,\n        restriction_type: (v.restriction_info || []).map((r) => r.restriction_type).filter(Boolean).join(', ') || undefined,\n        violation_type: v.violation_info?.violation_type || undefined,\n        details: v,\n      } });\n    }\n    for (const m of v.message_echoes || []) {\n      const text = describe(m);\n      if (text == null) continue;\n      const c = contactFor(m.to, m.to_user_id);\n      const to = digits(m.to || c.wa_id);\n      const userId = m.to_user_id || c.user_id || null;\n      if (!to && !userId) continue;\n      out.push({ json: { kind: 'echo', phone: to || userId, user_id: userId, username: c.profile?.username || null,\n        wa_message_id: m.id, message_type: m.type, text: String(text).trim() } });\n    }\n  }\n}\nreturn out;"
       }
     },
     {
@@ -93,13 +93,97 @@
       ],
       "parameters": {
         "mode": "expression",
-        "numberOutputs": 3,
-        "output": "={{ ({ owner: 0, echo: 1, customer: 2 })[$json.kind] ?? 2 }}",
+        "numberOutputs": 4,
+        "output": "={{ ({ owner: 0, echo: 1, customer: 2, account: 3 })[$json.kind] ?? 2 }}",
         "options": {}
       }
     },
     {
       "id": "n-007",
+      "name": "Record account event",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        700,
+        -120
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.RAPS_API_URL + \"/whatsapp/link-events\" }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-api-key",
+              "value": "={{ $env.RAPS_API_KEY }}"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 20000
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ source: \"webhook\", event: $json.event, reason: $json.reason, ban_state: $json.ban_state, restriction_type: $json.restriction_type, violation_type: $json.violation_type, details: $json.details }) }}"
+      }
+    },
+    {
+      "id": "n-008",
+      "name": "Alert needed?",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.5,
+      "position": [
+        920,
+        -120
+      ],
+      "parameters": {
+        "mode": "expression",
+        "numberOutputs": 2,
+        "output": "={{ ($json.alert && $env.ALERT_PUSH_URL) ? 0 : 1 }}",
+        "options": {}
+      }
+    },
+    {
+      "id": "n-009",
+      "name": "Push alert to owner",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        1140,
+        -140
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.ALERT_PUSH_URL }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Title",
+              "value": "RAPS WhatsApp bot"
+            },
+            {
+              "name": "Priority",
+              "value": "urgent"
+            },
+            {
+              "name": "Tags",
+              "value": "rotating_light"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "text/plain; charset=utf-8",
+        "body": "={{ $json.text }}",
+        "options": {
+          "timeout": 20000
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "n-010",
       "name": "Run owner command",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.5,
@@ -128,7 +212,7 @@
       }
     },
     {
-      "id": "n-008",
+      "id": "n-011",
       "name": "Reply to owner",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.5,
@@ -138,7 +222,7 @@
       ],
       "parameters": {
         "method": "POST",
-        "url": "={{ ($env.GRAPH_API_BASE || \"https://graph.facebook.com/v21.0\") + \"/\" + String($env.WA_PHONE_NUMBER_ID).trim() + \"/messages\" }}",
+        "url": "={{ ($env.GRAPH_API_BASE || \"https://graph.facebook.com/v27.0\") + \"/\" + String($env.WA_PHONE_NUMBER_ID).trim() + \"/messages\" }}",
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [
@@ -150,14 +234,14 @@
         },
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({ messaging_product: \"whatsapp\", recipient_type: \"individual\", to: $('Parse Meta payload').item.json.phone, type: \"text\", text: { preview_url: false, body: $json.reply } }) }}",
+        "jsonBody": "={{ JSON.stringify({ messaging_product: \"whatsapp\", recipient_type: \"individual\", ...(/^[A-Z]{2}\\./.test(String($('Parse Meta payload').item.json.phone)) ? { recipient: $('Parse Meta payload').item.json.phone } : { to: $('Parse Meta payload').item.json.phone }), type: \"text\", text: { preview_url: false, body: $json.reply } }) }}",
         "options": {
           "timeout": 20000
         }
       }
     },
     {
-      "id": "n-009",
+      "id": "n-012",
       "name": "Log owner app message",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.5,
@@ -182,11 +266,11 @@
         },
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({ phone: $json.phone, direction: \"out\", kind: \"owner_app\", wa_message_id: $json.wa_message_id, body: $json.text }) }}"
+        "jsonBody": "={{ JSON.stringify({ phone: $json.phone, user_id: $json.user_id || undefined, username: $json.username || undefined, direction: \"out\", kind: \"owner_app\", wa_message_id: $json.wa_message_id, body: $json.text }) }}"
       }
     },
     {
-      "id": "n-010",
+      "id": "n-013",
       "name": "Pause bot for customer",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.5,
@@ -212,7 +296,7 @@
       }
     },
     {
-      "id": "n-011",
+      "id": "n-014",
       "name": "Log inbound",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.5,
@@ -237,11 +321,11 @@
         },
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({ phone: $json.phone, direction: \"in\", wa_message_id: $json.wa_message_id, kind: $json.message_type, body: $json.text, name: $json.name || undefined, referral: $json.referral || undefined }) }}"
+        "jsonBody": "={{ JSON.stringify({ phone: $json.phone, user_id: $json.user_id || undefined, username: $json.username || undefined, direction: \"in\", wa_message_id: $json.wa_message_id, kind: $json.message_type, body: $json.text, name: $json.name || undefined, referral: $json.referral || undefined }) }}"
       }
     },
     {
-      "id": "n-012",
+      "id": "n-015",
       "name": "Should reply?",
       "type": "n8n-nodes-base.switch",
       "typeVersion": 3.5,
@@ -257,7 +341,7 @@
       }
     },
     {
-      "id": "n-013",
+      "id": "n-016",
       "name": "Load profile",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.5,
@@ -283,7 +367,7 @@
       }
     },
     {
-      "id": "n-014",
+      "id": "n-017",
       "name": "Build prompt",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -297,7 +381,7 @@
       }
     },
     {
-      "id": "n-015",
+      "id": "n-018",
       "name": "AI Agent",
       "type": "@n8n/n8n-nodes-langchain.agent",
       "typeVersion": 3.1,
@@ -317,7 +401,7 @@
       "onError": "continueErrorOutput"
     },
     {
-      "id": "n-016",
+      "id": "n-019",
       "name": "Gemini",
       "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
       "typeVersion": 1,
@@ -339,7 +423,7 @@
       }
     },
     {
-      "id": "n-017",
+      "id": "n-020",
       "name": "Gemini fallback",
       "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
       "typeVersion": 1,
@@ -361,7 +445,7 @@
       }
     },
     {
-      "id": "n-018",
+      "id": "n-021",
       "name": "Clean reply",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -375,7 +459,7 @@
       }
     },
     {
-      "id": "n-019",
+      "id": "n-022",
       "name": "Send reply",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.5,
@@ -385,7 +469,7 @@
       ],
       "parameters": {
         "method": "POST",
-        "url": "={{ ($env.GRAPH_API_BASE || \"https://graph.facebook.com/v21.0\") + \"/\" + String($env.WA_PHONE_NUMBER_ID).trim() + \"/messages\" }}",
+        "url": "={{ ($env.GRAPH_API_BASE || \"https://graph.facebook.com/v27.0\") + \"/\" + String($env.WA_PHONE_NUMBER_ID).trim() + \"/messages\" }}",
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [
@@ -397,14 +481,14 @@
         },
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({ messaging_product: \"whatsapp\", recipient_type: \"individual\", to: $json.phone, type: \"text\", text: { preview_url: false, body: $json.reply } }) }}",
+        "jsonBody": "={{ JSON.stringify({ messaging_product: \"whatsapp\", recipient_type: \"individual\", ...(/^[A-Z]{2}\\./.test(String($json.phone)) ? { recipient: $json.phone } : { to: $json.phone }), type: \"text\", text: { preview_url: false, body: $json.reply } }) }}",
         "options": {
           "timeout": 20000
         }
       }
     },
     {
-      "id": "n-020",
+      "id": "n-023",
       "name": "Log reply",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.5,
@@ -433,7 +517,7 @@
       }
     },
     {
-      "id": "n-021",
+      "id": "n-024",
       "name": "Holding reply",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -447,7 +531,7 @@
       }
     },
     {
-      "id": "n-022",
+      "id": "n-025",
       "name": "Send holding reply",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.5,
@@ -457,7 +541,7 @@
       ],
       "parameters": {
         "method": "POST",
-        "url": "={{ ($env.GRAPH_API_BASE || \"https://graph.facebook.com/v21.0\") + \"/\" + String($env.WA_PHONE_NUMBER_ID).trim() + \"/messages\" }}",
+        "url": "={{ ($env.GRAPH_API_BASE || \"https://graph.facebook.com/v27.0\") + \"/\" + String($env.WA_PHONE_NUMBER_ID).trim() + \"/messages\" }}",
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [
@@ -469,14 +553,14 @@
         },
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({ messaging_product: \"whatsapp\", recipient_type: \"individual\", to: $json.phone, type: \"text\", text: { preview_url: false, body: $json.reply } }) }}",
+        "jsonBody": "={{ JSON.stringify({ messaging_product: \"whatsapp\", recipient_type: \"individual\", ...(/^[A-Z]{2}\\./.test(String($json.phone)) ? { recipient: $json.phone } : { to: $json.phone }), type: \"text\", text: { preview_url: false, body: $json.reply } }) }}",
         "options": {
           "timeout": 20000
         }
       }
     },
     {
-      "id": "n-023",
+      "id": "n-026",
       "name": "Alert owner: AI failed",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.5,
@@ -505,7 +589,7 @@
       }
     },
     {
-      "id": "n-024",
+      "id": "n-027",
       "name": "get_rates",
       "type": "n8n-nodes-base.httpRequestTool",
       "typeVersion": 4.5,
@@ -538,7 +622,7 @@
       }
     },
     {
-      "id": "n-025",
+      "id": "n-028",
       "name": "check_service_area",
       "type": "n8n-nodes-base.httpRequestTool",
       "typeVersion": 4.5,
@@ -580,7 +664,7 @@
       }
     },
     {
-      "id": "n-026",
+      "id": "n-029",
       "name": "get_quote",
       "type": "n8n-nodes-base.httpRequestTool",
       "typeVersion": 4.5,
@@ -616,7 +700,7 @@
       }
     },
     {
-      "id": "n-027",
+      "id": "n-030",
       "name": "check_availability",
       "type": "n8n-nodes-base.httpRequestTool",
       "typeVersion": 4.5,
@@ -686,7 +770,7 @@
       }
     },
     {
-      "id": "n-028",
+      "id": "n-031",
       "name": "create_booking",
       "type": "n8n-nodes-base.httpRequestTool",
       "typeVersion": 4.5,
@@ -726,7 +810,7 @@
       }
     },
     {
-      "id": "n-029",
+      "id": "n-032",
       "name": "find_bookings",
       "type": "n8n-nodes-base.httpRequestTool",
       "typeVersion": 4.5,
@@ -772,7 +856,7 @@
       }
     },
     {
-      "id": "n-030",
+      "id": "n-033",
       "name": "cancel_booking",
       "type": "n8n-nodes-base.httpRequestTool",
       "typeVersion": 4.5,
@@ -808,7 +892,7 @@
       }
     },
     {
-      "id": "n-031",
+      "id": "n-034",
       "name": "request_reschedule",
       "type": "n8n-nodes-base.httpRequestTool",
       "typeVersion": 4.5,
@@ -844,7 +928,7 @@
       }
     },
     {
-      "id": "n-032",
+      "id": "n-035",
       "name": "report_payment",
       "type": "n8n-nodes-base.httpRequestTool",
       "typeVersion": 4.5,
@@ -880,7 +964,7 @@
       }
     },
     {
-      "id": "n-033",
+      "id": "n-036",
       "name": "update_lead_profile",
       "type": "n8n-nodes-base.httpRequestTool",
       "typeVersion": 4.5,
@@ -916,7 +1000,7 @@
       }
     },
     {
-      "id": "n-034",
+      "id": "n-037",
       "name": "flag_for_human",
       "type": "n8n-nodes-base.httpRequestTool",
       "typeVersion": 4.5,
@@ -1016,6 +1100,35 @@
         [
           {
             "node": "Log inbound",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Record account event",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Record account event": {
+      "main": [
+        [
+          {
+            "node": "Alert needed?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Alert needed?": {
+      "main": [
+        [
+          {
+            "node": "Push alert to owner",
             "type": "main",
             "index": 0
           }

@@ -1,0 +1,35 @@
+# Test setup: the normal stack with Meta's Graph API replaced by a mock, so
+# WF1 can be tested end to end without WhatsApp. See docs/E2E.md.
+#
+#   docker compose -f docker-compose.yml -f docker-compose.e2e.yml up -d --build postgres api n8n mock-graph
+#
+# Uses its own volumes, so it never touches the real database.
+
+services:
+  postgres:
+    volumes: !override
+      - pgdata-e2e:/var/lib/postgresql/data
+      - ./db/init:/docker-entrypoint-initdb.d:ro
+
+  n8n:
+    environment:
+      GRAPH_API_BASE: http://mock-graph:4010/v27.0
+      WA_ACCESS_TOKEN: mock-token
+      WA_PHONE_NUMBER_ID: "1234567890"
+      ALERT_PUSH_URL: http://mock-graph:4010/__push
+    volumes: !override
+      - n8ndata-e2e:/home/node/.n8n
+      - ./n8n/workflows:/workflows
+
+  mock-graph:
+    image: node:22-alpine
+    command: ["node", "/app/mock-graph.mjs"]
+    volumes:
+      - ./scripts/mock-graph.mjs:/app/mock-graph.mjs:ro
+    ports:
+      - "4010:4010"
+    networks: [raps]
+
+volumes:
+  pgdata-e2e:
+  n8ndata-e2e:

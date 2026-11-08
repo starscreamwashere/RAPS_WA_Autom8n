@@ -1,7 +1,7 @@
 const { pool } = require('../db');
 const clock = require('../clock');
-const { notFound } = require('../errors');
-const { normalizePhone, displayPhone } = require('../phone');
+const { notFound, HttpError } = require('../errors');
+const { normalizePhone, normalizeContact, isUserId, displayContact } = require('../phone');
 const { getSettings } = require('../settings');
 const { checkArea } = require('./serviceAreas');
 
@@ -12,18 +12,64 @@ const PROFILE_FIELDS = [
   'rental_start_date', 'rental_days', 'controllers_wanted', 'area', 'games_interest', 'notes',
 ];
 
-async function upsertLead(client, phone, { name } = {}) {
+// Finds or creates the lead for a contact key (phone or BSUID). When a webhook
+// carries both the phone and the BSUID, they are stored together, and a lead
+// that was first known only by its BSUID is merged into the phone's lead.
+async function upsertLead(client, key, { name, phone, user_id: userId, username } = {}) {
+  const k = normalizeContact(key);
+  const p = phone ? normalizePhone(phone) : (k && !isUserId(k) ? k : null);
+  const u = userId || (isUserId(k) ? k : null);
+  if (!p && !u) throw new HttpError(400, 'NO_CONTACT', 'A phone number or WhatsApp user ID is needed');
+
+  let byPhone = p ? (await client.query('SELECT * FROM leads WHERE phone = $1 FOR UPDATE', [p])).rows[0] : null;
+  const byUser = u ? (await client.query('SELECT * FROM leads WHERE user_id = $1 FOR UPDATE', [u])).rows[0] : null;
+  if (byPhone && byUser && byPhone.id !== byUser.id) byPhone = await mergeLeads(client, byPhone, byUser);
+  const found = byPhone || byUser;
+
+  if (!found) {
+    const { rows } = await client.query(
+      `INSERT INTO leads (phone, user_id, username, name, first_seen_at) VALUES ($1, $2, $3, $4, $5)
+       ON CONFLICT DO NOTHING RETURNING *, true AS inserted`,
+      [p, u, username || null, name || null, clock.now()]);
+    if (rows[0]) return rows[0];
+    return upsertLead(client, key, { name, phone, user_id: userId, username }); // lost a race: read it again
+  }
+  // The phone is the stable identity: a BSUID changes when the user changes number
   const { rows } = await client.query(
-    `INSERT INTO leads (phone, name, first_seen_at) VALUES ($1, $2, $3)
-     ON CONFLICT (phone) DO UPDATE SET name = coalesce(leads.name, EXCLUDED.name)
-     RETURNING *, (xmax = 0) AS inserted`,
-    [normalizePhone(phone), name || null, clock.now()],
-  );
+    `UPDATE leads SET phone = coalesce(phone, $2),
+                      user_id = coalesce($3, user_id),
+                      username = coalesce($4, username),
+                      name = coalesce(name, $5)
+      WHERE id = $1 RETURNING *, false AS inserted`,
+    [found.id, p, u, username || null, name || null]);
   return rows[0];
 }
 
-async function getLeadByPhone(client, phone) {
-  const { rows } = await client.query('SELECT * FROM leads WHERE phone = $1', [normalizePhone(phone)]);
+// Moves everything from the BSUID-only lead into the phone lead, then removes it
+async function mergeLeads(client, keep, drop) {
+  for (const table of ['messages', 'bookings', 'handoffs']) {
+    await client.query(`UPDATE ${table} SET lead_id = $1 WHERE lead_id = $2`, [keep.id, drop.id]);
+  }
+  const fill = PROFILE_FIELDS.filter((f) => keep[f] == null && drop[f] != null);
+  await client.query('DELETE FROM leads WHERE id = $1', [drop.id]);
+  const sets = [
+    ...fill.map((f, i) => `${f} = $${i + 2}`),
+    `username = coalesce(username, $${fill.length + 2})`,
+    `last_inbound_at = greatest(last_inbound_at, $${fill.length + 3})`,
+    `first_seen_at = least(first_seen_at, $${fill.length + 4})`,
+    `bot_paused_at = coalesce(bot_paused_at, $${fill.length + 5})`,
+    `opted_out = opted_out OR $${fill.length + 6}`,
+  ];
+  const { rows } = await client.query(`UPDATE leads SET ${sets.join(', ')} WHERE id = $1 RETURNING *`,
+    [keep.id, ...fill.map((f) => drop[f]), drop.username, drop.last_inbound_at, drop.first_seen_at,
+      drop.bot_paused_at, drop.opted_out]);
+  return rows[0];
+}
+
+async function getLeadByContact(client, key) {
+  const k = normalizeContact(key);
+  if (!k) return null;
+  const { rows } = await client.query(`SELECT * FROM leads WHERE ${isUserId(k) ? 'user_id' : 'phone'} = $1`, [k]);
   return rows[0] || null;
 }
 
@@ -54,7 +100,7 @@ function missingFields(lead, settings) {
 const HISTORY = 30;
 
 async function leadProfile(phone, client = pool, { currentMessageId } = {}) {
-  const lead = await getLeadByPhone(client, phone);
+  const lead = await getLeadByContact(client, phone);
   if (!lead) throw notFound('Lead');
   const settings = await getSettings(client);
   const [{ rows: bookings }, { rows: handoffs }, { rows: history }] = await Promise.all([
@@ -66,7 +112,7 @@ async function leadProfile(phone, client = pool, { currentMessageId } = {}) {
     client.query(`SELECT id, reason, summary, created_at FROM handoffs WHERE lead_id = $1 AND status = 'open'`, [lead.id]),
     client.query(
       `SELECT direction, kind, body, created_at FROM messages
-        WHERE lead_id = $1 AND body IS NOT NULL AND wa_message_id IS DISTINCT FROM $2
+        WHERE lead_id = $1 AND body IS NOT NULL AND ($2::text IS NULL OR wa_message_id IS DISTINCT FROM $2)
         ORDER BY created_at DESC, id DESC LIMIT $3`, [lead.id, currentMessageId || null, HISTORY]),
   ]);
   const { inserted, ...clean } = lead;
@@ -86,7 +132,7 @@ async function leadProfile(phone, client = pool, { currentMessageId } = {}) {
 }
 
 async function updateProfile(phone, patch, client = pool) {
-  const lead = await getLeadByPhone(client, phone);
+  const lead = await getLeadByContact(client, phone);
   if (!lead) throw notFound('Lead');
   const fields = Object.fromEntries(Object.entries(patch).filter(([k]) => PROFILE_FIELDS.includes(k)));
 
@@ -115,21 +161,21 @@ async function pauseBot(phone, client = pool) {
   const lead = await upsertLead(client, phone);
   const firstPause = lead.bot_paused_at == null;
   if (firstPause) await client.query('UPDATE leads SET bot_paused_at = $2 WHERE id = $1', [lead.id, clock.now()]);
-  const label = lead.name ? `${lead.name} (${displayPhone(lead.phone)})` : displayPhone(lead.phone);
+  const label = lead.name ? `${lead.name} (${displayContact(lead)})` : displayContact(lead);
   return {
     paused: true,
     first_pause: firstPause,
     notifications: firstPause
-      ? [{ to: 'owner', text: `🤫 Bot paused for ${label}. Send RESUME ${displayPhone(lead.phone)} to hand back.` }]
+      ? [{ to: 'owner', text: `🤫 Bot paused for ${label}. Send RESUME ${displayContact(lead)} to hand back.` }]
       : [],
   };
 }
 
 async function resumeBot(phone, client = pool) {
-  const lead = await getLeadByPhone(client, phone);
+  const lead = await getLeadByContact(client, phone);
   if (!lead) throw notFound('Lead');
   await client.query('UPDATE leads SET bot_paused_at = NULL WHERE id = $1', [lead.id]);
   return { paused: false, lead };
 }
 
-module.exports = { upsertLead, getLeadByPhone, leadProfile, updateProfile, missingFields, pauseBot, resumeBot, PROFILE_FIELDS };
+module.exports = { upsertLead, getLeadByContact, getLeadByPhone: getLeadByContact, leadProfile, updateProfile, missingFields, pauseBot, resumeBot, PROFILE_FIELDS };

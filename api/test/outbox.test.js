@@ -101,4 +101,8 @@ test('the profile carries recent conversation, oldest first, without the message
     ['assistant', 'Sure! How many controllers?'],
     ['team', 'Hi, owner here 👋'],
   ]);
+  // Without ?current, nothing is left out, including the bot's own replies
+  // (they have no WhatsApp message id)
+  const all = (await api.get(`/leads/${P}`)).body;
+  assert.deepEqual(all.recent_messages.map((m) => m.from), ['customer', 'assistant', 'team', 'customer']);
 });
