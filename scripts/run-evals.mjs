@@ -149,7 +149,9 @@ async function runTurn(state, text) {
     for (const { functionCall: fc } of fnCalls) {
       const result = await callTool(fc.name, fc.args, { phone: state.phone, messageId });
       calls.push({ name: fc.name, args: fc.args || {}, ok: !result.error, result });
-      responses.push({ functionResponse: { name: fc.name, response: result } });
+      // Gemini wants an object here; some endpoints return a list
+      const response = result && typeof result === 'object' && !Array.isArray(result) ? result : { result };
+      responses.push({ functionResponse: { name: fc.name, response } });
     }
     state.contents.push({ role: 'user', parts: responses });
   }
