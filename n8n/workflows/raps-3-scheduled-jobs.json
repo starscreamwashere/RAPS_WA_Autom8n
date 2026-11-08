@@ -1,0 +1,207 @@
+{
+  "name": "RAPS · 3 · Reminders and digest",
+  "nodes": [
+    {
+      "id": "n-001",
+      "name": "Every 15 minutes",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 15
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "n-002",
+      "name": "Expire lapsed holds",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        220,
+        0
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.RAPS_API_URL + \"/jobs/sweep\" }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-api-key",
+              "value": "={{ $env.RAPS_API_KEY }}"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 20000
+        }
+      }
+    },
+    {
+      "id": "n-003",
+      "name": "Queue reminders",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        440,
+        0
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.RAPS_API_URL + \"/jobs/reminders/run\" }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-api-key",
+              "value": "={{ $env.RAPS_API_KEY }}"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 20000
+        }
+      }
+    },
+    {
+      "id": "n-004",
+      "name": "Queue review requests",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        660,
+        0
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.RAPS_API_URL + \"/jobs/reviews/run\" }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-api-key",
+              "value": "={{ $env.RAPS_API_KEY }}"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 20000
+        }
+      }
+    },
+    {
+      "id": "n-005",
+      "name": "Every day 21:00",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        220
+      ],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 21 * * *"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "n-006",
+      "name": "Queue owner digest",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        220,
+        220
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.RAPS_API_URL + \"/reports/digest/send\" }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-api-key",
+              "value": "={{ $env.RAPS_API_KEY }}"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 20000
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Every 15 minutes": {
+      "main": [
+        [
+          {
+            "node": "Expire lapsed holds",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Expire lapsed holds": {
+      "main": [
+        [
+          {
+            "node": "Queue reminders",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Queue reminders": {
+      "main": [
+        [
+          {
+            "node": "Queue review requests",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Every day 21:00": {
+      "main": [
+        [
+          {
+            "node": "Queue owner digest",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "Asia/Kolkata",
+    "saveDataErrorExecution": "all",
+    "saveDataSuccessExecution": "all"
+  },
+  "pinData": {},
+  "meta": {
+    "generatedBy": "scripts/build-workflows.mjs"
+  },
+  "id": "raps-3-scheduled-jobs"
+}

@@ -36,8 +36,10 @@ services:
     networks: [raps]
 
   n8n:
-    image: n8nio/n8n:latest
+    image: n8nio/n8n:2.46.6   # the workflows are generated for this version
     restart: unless-stopped
+    # WhatsApp, owner and model settings the workflows read with $env
+    env_file: .env
     environment:
       DB_TYPE: postgresdb
       DB_POSTGRESDB_HOST: postgres
@@ -54,6 +56,8 @@ services:
       RAPS_API_URL: http://api:3000
       RAPS_API_KEY: ${API_KEY}
       N8N_BLOCK_ENV_ACCESS_IN_NODE: "false"
+      # Code nodes verify Meta's webhook signature with crypto
+      NODE_FUNCTION_ALLOW_BUILTIN: crypto
     depends_on:
       postgres:
         condition: service_healthy
