@@ -17,15 +17,25 @@ Updated each working session so a new session can pick up the thread.
    its own Tech Provider (business verification + App Review), then coexistence
    onboarding with `scripts/meta-onboard.mjs`. Owner's first step: phase 0 checks
    (who manages the number today, app version, no WhatsApp for Windows).
-2. **Owner alert on disconnection**: `account_update` with `PARTNER_REMOVED` means the
-   API link is gone (e.g. 14 days without the phone); WF1 ignores it today.
-3. **Hosting decision** (always-on machine or small VPS) and go-live. Must be live
+2. **Hosting decision** (always-on machine or small VPS) and go-live. Must be live
    before phase 5 of the Meta runbook.
-4. **LLM quota before go-live**: Gemini free-tier limits are per model per day
+3. **LLM quota before go-live**: Gemini free-tier limits are per model per day
    (Flash: ~20 requests/day, used up by one test run; Flash-Lite handled two full
    runs of ~100 requests each). One customer message is 2–4 requests. Check the
    real Flash-Lite daily limit at https://ai.dev/rate-limit, then decide: enable
    billing on the key, or move to Claude Haiku.
+
+## WhatsApp disconnection alert (done Nov 2026)
+- `POST /whatsapp/link-events` records Meta `account_update` webhooks (WF1) and a health
+  check every 3 hours (WF3: Meta's `platform_type` for the number; catches missed
+  webhooks and expired tokens). State lives in `settings.whatsapp_link`; history in
+  `whatsapp_link_events` (migration 005). `GET /whatsapp/link` shows both.
+- The owner is alerted once per change (restrictions: every new one), in plain words
+  with the fix: by WhatsApp (outbox) and by push to `ALERT_PUSH_URL` (ntfy), because a
+  disconnected number cannot send WhatsApp. The digest leads with it until fixed.
+- Tests: 61/61 API (4 new in `whatsapp-link.test.js`); e2e 10/10 (push on
+  PARTNER_REMOVED); WF3's health-check nodes run in n8n against the mock: expired
+  token → alert, repeat → quiet, Meta 5xx → no verdict, healthy → recovery push.
 
 ## WhatsApp usernames (done Nov 2026)
 - Customers are identified by a contact key: phone, or business-scoped user ID (BSUID)

@@ -137,7 +137,19 @@ const bookingPatch = z.object({
 
 const paymentClaim = z.object({ phone, amount: int(1, 10000000).optional(), note: z.string().max(500).optional() });
 
+// Meta account_update webhooks (WF1) and the periodic health check (WF3)
+const linkEvent = z.object({
+  source: z.enum(['webhook', 'health_check']),
+  event: z.string().max(100),
+  reason: z.string().max(200).optional(),
+  ban_state: z.string().max(100).optional(),
+  restriction_type: z.string().max(200).optional(),
+  violation_type: z.string().max(200).optional(),
+  error: z.string().max(500).optional(),
+  details: z.any().optional(),
+});
+
 module.exports = {
-  z, clean, date, messageIn, leadPatch, bookingRequest, quoteRequest, createBooking, reschedule, handoff, payment,
+  z, clean, linkEvent, date, messageIn, leadPatch, bookingRequest, quoteRequest, createBooking, reschedule, handoff, payment,
   bookingPatch, paymentClaim, phone,
 };

@@ -110,6 +110,12 @@ has to be started within 24 hours of it, and customer messages start arriving at
 2. `.env`: `WA_VERIFY_TOKEN` (any long random string), `WA_APP_SECRET` (phase 2),
    `OWNER_PHONE`, `BUSINESS_PHONE=919082201911`, `LLM_MODELS`, Gemini key in n8n
    (`docs/E2E.md` step 2 shows the import; in production use the n8n UI → Credentials).
+   **`ALERT_PUSH_URL`** (owner, 5 min): if Meta disconnects the number, the bot can no
+   longer send WhatsApp messages, so that alert also goes out as a phone push. Install
+   the **ntfy** app (Android/iPhone), tap *Subscribe to topic*, enter a long random
+   name such as `raps-7f3k9q2m1x` (anyone who knows it can read the alerts), and set
+   `ALERT_PUSH_URL=https://ntfy.sh/raps-7f3k9q2m1x`. Test it:
+   `curl -d "test from RAPS" https://ntfy.sh/raps-7f3k9q2m1x`.
 3. Import and **publish** the three workflows in n8n.
 4. App Dashboard → WhatsApp → **Configuration** → Webhook:
    - Callback URL: `https://<NGROK_DOMAIN>/webhook/whatsapp`
@@ -117,8 +123,9 @@ has to be started within 24 hours of it, and customer messages start arriving at
    - Click *Verify and save* (WF1 answers Meta's check).
 5. Subscribe these webhook fields:
    `messages`, `smb_message_echoes` (owner typing in the app → bot pauses),
-   `account_update` (disconnections), `history`, `smb_app_state_sync`.
-   WF1 uses the first two; the others are accepted and ignored for now.
+   `account_update` (disconnections, bans, restrictions → owner alert), `history`,
+   `smb_app_state_sync`. WF1 uses the first three; the last two are accepted and
+   ignored for now.
 
 ## Phase 5: onboard the number with Embedded Signup (dev + owner together, 15 min)
 
@@ -227,6 +234,8 @@ From a third phone (not the business or owner number):
 3. Owner sends `RESUME <that number>` from his personal number → the bot answers again.
 4. Owner sends `HELP` and `TODAY` → command replies.
 5. In n8n → Executions, every run is green; in the API, `GET /outbox/pending` empties.
+6. `GET /whatsapp/link` says `connected`, and within 3 hours WF3's health check has
+   recorded a `HEALTH_OK` there.
 
 Then tell regular customers nothing changes: same number, same app replies from Vindy.
 
@@ -256,9 +265,12 @@ Meta charges per delivered message (rates in INR on
    `scripts/e2e-wf1.mjs`.
 2. **Chat history.** The history sync arrives as `history` webhooks, which WF1
    currently ignores. Importing it would give the bot memory of past chats; optional.
-3. **Disconnection alert.** An `account_update` with `PARTNER_REMOVED` means the API
-   link is gone (for example after 14 days without the phone). WF1 ignores it today;
-   it should alert the owner.
+3. **Disconnection alert: handled.** Meta's `account_update` webhooks (disconnected,
+   banned, restricted) and a health check every 3 hours (WF3 asks Meta whether the
+   number is still on the Cloud API; also catches an expired token) alert the owner
+   once per change, in plain words with the fix, by WhatsApp and by push
+   (`ALERT_PUSH_URL`). The nightly digest leads with the problem until it is fixed,
+   and recovery is announced. Status: `GET /whatsapp/link`.
 
 ## Offboarding (if ever needed)
 

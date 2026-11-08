@@ -144,6 +144,166 @@
           "timeout": 20000
         }
       }
+    },
+    {
+      "id": "n-007",
+      "name": "Every 3 hours",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        440
+      ],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "hours",
+              "hoursInterval": 3
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "n-008",
+      "name": "Ask Meta about the number",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        220,
+        440
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "={{ ($env.GRAPH_API_BASE || \"https://graph.facebook.com/v27.0\") + \"/\" + String($env.WA_PHONE_NUMBER_ID).trim() }}",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "fields",
+              "value": "platform_type,is_on_biz_app,status,quality_rating"
+            }
+          ]
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ \"Bearer \" + String($env.WA_ACCESS_TOKEN).trim() }}"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 20000,
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "n-009",
+      "name": "Read the answer",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        440,
+        440
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// Meta's answer about the business number → HEALTH_OK / HEALTH_ERROR.\n// No answer at all (network trouble, Meta 5xx, not configured yet) is not a\n// verdict: nothing is recorded and the next check tries again.\nif (!String($env.WA_PHONE_NUMBER_ID || '').trim()) return [];\nconst out = [];\nfor (const item of $input.all()) {\n  const status = item.json.statusCode;\n  const body = item.json.body || {};\n  if (!status || status >= 500) continue;\n  if (status === 200 && body.platform_type === 'CLOUD_API') {\n    out.push({ json: { event: 'HEALTH_OK', details: body } });\n    continue;\n  }\n  const error = body.error\n    ? (body.error.message || 'error') + ' (code ' + body.error.code + ')'\n    : 'the number is not on the Cloud API (platform: ' + (body.platform_type || 'unknown') + ')';\n  out.push({ json: { event: 'HEALTH_ERROR', error: error.slice(0, 400), details: body } });\n}\nreturn out;"
+      }
+    },
+    {
+      "id": "n-010",
+      "name": "Record health check",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        660,
+        440
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.RAPS_API_URL + \"/whatsapp/link-events\" }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-api-key",
+              "value": "={{ $env.RAPS_API_KEY }}"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 20000
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ source: \"health_check\", event: $json.event, error: $json.error, details: $json.details }) }}"
+      }
+    },
+    {
+      "id": "n-011",
+      "name": "Alert needed?",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.5,
+      "position": [
+        880,
+        440
+      ],
+      "parameters": {
+        "mode": "expression",
+        "numberOutputs": 2,
+        "output": "={{ ($json.alert && $env.ALERT_PUSH_URL) ? 0 : 1 }}",
+        "options": {}
+      }
+    },
+    {
+      "id": "n-012",
+      "name": "Push alert to owner",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        1100,
+        420
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.ALERT_PUSH_URL }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Title",
+              "value": "RAPS WhatsApp bot"
+            },
+            {
+              "name": "Priority",
+              "value": "urgent"
+            },
+            {
+              "name": "Tags",
+              "value": "rotating_light"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "text/plain; charset=utf-8",
+        "body": "={{ $json.text }}",
+        "options": {
+          "timeout": 20000
+        }
+      },
+      "onError": "continueRegularOutput"
     }
   ],
   "connections": {
@@ -185,6 +345,61 @@
         [
           {
             "node": "Queue owner digest",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Every 3 hours": {
+      "main": [
+        [
+          {
+            "node": "Ask Meta about the number",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ask Meta about the number": {
+      "main": [
+        [
+          {
+            "node": "Read the answer",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read the answer": {
+      "main": [
+        [
+          {
+            "node": "Record health check",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Record health check": {
+      "main": [
+        [
+          {
+            "node": "Alert needed?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Alert needed?": {
+      "main": [
+        [
+          {
+            "node": "Push alert to owner",
             "type": "main",
             "index": 0
           }

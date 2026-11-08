@@ -56,6 +56,7 @@ node scripts/e2e-wf1.mjs
 | while paused | customer messages are logged, the bot stays quiet |
 | RESUME | the owner's `RESUME <phone>` hands the customer back to the bot |
 | WhatsApp username | a customer with no phone in the webhook (only a user ID) is answered by `recipient` and gets a lead |
+| disconnection | Meta's `account_update` PARTNER_REMOVED → a push alert to `ALERT_PUSH_URL` (set it to `http://mock-graph:4010/__push`, or `http://localhost:4010/__push` outside Docker) and the link recorded as disconnected |
 
 With WF2 published, the "bot paused" notes in the outbox reach the mock
 within 30 s: `curl localhost:4010/__sent`.

@@ -10,6 +10,7 @@ const bookings = require('./services/bookings');
 const handoffs = require('./services/handoffs');
 const jobs = require('./services/jobs');
 const { digest } = require('./services/digest');
+const whatsappLink = require('./services/whatsappLink');
 const { runOwnerCommand } = require('./services/ownerCommands');
 const outbox = require('./services/outbox');
 const config = require('./config');
@@ -188,6 +189,12 @@ router.post('/jobs/mark', async (req, res) => {
 router.get('/reports/digest', async (req, res) => {
   res.json(await digest(req.query.date ? v.date.parse(req.query.date) : undefined));
 });
+
+// ---- WhatsApp link health (account_update webhooks, periodic check) -------------
+router.post('/whatsapp/link-events', async (req, res) => {
+  res.json(await whatsappLink.recordLinkEvent(v.linkEvent.parse(v.clean(req.body))));
+});
+router.get('/whatsapp/link', async (req, res) => res.json(await whatsappLink.linkStatus()));
 
 // ---- Outbox (sent by the n8n outbox loop) ---------------------------------------
 router.get('/outbox/pending', async (req, res) => res.json(await outbox.pending()));

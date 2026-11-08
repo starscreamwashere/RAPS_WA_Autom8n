@@ -16,6 +16,7 @@ services:
       GRAPH_API_BASE: http://mock-graph:4010/v27.0
       WA_ACCESS_TOKEN: mock-token
       WA_PHONE_NUMBER_ID: "1234567890"
+      ALERT_PUSH_URL: http://mock-graph:4010/__push
     volumes: !override
       - n8ndata-e2e:/home/node/.n8n
       - ./n8n/workflows:/workflows

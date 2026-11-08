@@ -196,6 +196,32 @@ await check('customer with a WhatsApp username (no phone): answered by user ID',
   assert(lead.user_id === userId && lead.phone === null && lead.username === 'asha.games', `lead: ${JSON.stringify(lead).slice(0, 200)}`);
 });
 
+await check('Meta disconnects the number: owner gets a push alert (WhatsApp may be down) and the state is recorded', async () => {
+  const before = (await (await fetch(`${MOCK}/__push`)).json()).length;
+  await deliver({
+    object: 'whatsapp_business_account',
+    entry: [{ id: 'PARTNER', time: Math.floor(Date.now() / 1000), changes: [{ field: 'account_update', value: {
+      event: 'PARTNER_REMOVED',
+      waba_info: { waba_id: 'WABA', owner_business_id: 'BIZ' },
+      disconnection_info: { reason: 'PRIMARY_INACTIVITY', initiated_by: 'SYSTEM' },
+    } }] }],
+  });
+  const until = Date.now() + 20000;
+  let pushes = [];
+  while (Date.now() < until) {
+    pushes = (await (await fetch(`${MOCK}/__push`)).json()).slice(before);
+    if (pushes.length) break;
+    await sleep(1000);
+  }
+  assert(pushes.length === 1, `expected 1 push, got ${pushes.length} (is ALERT_PUSH_URL set to ${MOCK}/__push?)`);
+  assert(/DISCONNECTED: the business phone did not open WhatsApp for about 14 days/.test(pushes[0].text), pushes[0].text);
+  console.log(`   push: ${pushes[0].text.slice(0, 120)}…`);
+  const link = (await api('/whatsapp/link')).body;
+  assert(link.state === 'disconnected', `state is ${link.state}`);
+  // Reconnected later: back to normal (so the run can be repeated)
+  await api('/whatsapp/link-events', { method: 'POST', body: JSON.stringify({ source: 'health_check', event: 'HEALTH_OK' }) });
+});
+
 const passed = results.filter((r) => r.pass).length;
 console.log(`\n${passed}/${results.length} WF1 checks passed`);
 process.exit(passed === results.length ? 0 : 1);
