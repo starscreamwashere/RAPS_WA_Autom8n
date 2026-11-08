@@ -6,3 +6,6 @@ coverage/
 # local volumes
 data/
 evals-report.json
+
+# Meta onboarding result (contains a token)
+meta-onboarding.json

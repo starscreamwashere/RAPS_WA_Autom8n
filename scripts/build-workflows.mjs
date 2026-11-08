@@ -44,7 +44,7 @@ function apiCall(name, method, urlExpr, body, position, extra = {}) {
 }
 
 // A WhatsApp Cloud API send. `payload` is a JS expression for the message body.
-const GRAPH_URL = '={{ ($env.GRAPH_API_BASE || "https://graph.facebook.com/v21.0") + "/" + String($env.WA_PHONE_NUMBER_ID).trim() + "/messages" }}';
+const GRAPH_URL = '={{ ($env.GRAPH_API_BASE || "https://graph.facebook.com/v27.0") + "/" + String($env.WA_PHONE_NUMBER_ID).trim() + "/messages" }}';
 function whatsappSend(name, payload, position, extra = {}) {
   return node(name, 'n8n-nodes-base.httpRequest', 4.5, {
     method: 'POST',

@@ -13,15 +13,30 @@ Updated each working session so a new session can pick up the thread.
   Imported successfully into n8n 2.46.6 (needs Node 24 to run outside Docker).
 
 ## Next
-1. **Meta setup runbook** (`docs/META_SETUP.md`): coexistence onboarding, permanent
-   System User token, webhook URL + verify token, templates `owner_alert` and
-   `customer_update`.
-2. **Hosting decision** (always-on machine or small VPS) and go-live.
-3. **LLM quota before go-live**: Gemini free-tier limits are per model per day
+1. **Meta onboarding (owner + dev)**: follow `docs/META_SETUP.md`. Route A: RAPS becomes
+   its own Tech Provider (business verification + App Review), then coexistence
+   onboarding with `scripts/meta-onboard.mjs`. Owner's first step: phase 0 checks
+   (who manages the number today, app version, no WhatsApp for Windows).
+2. **Usernames / business-scoped user IDs** (Meta says required): customers who adopt a
+   WhatsApp username can arrive without a phone number. Store `user_id` on leads,
+   accept messages without `from`, send with `recipient`. Also alert the owner on
+   `account_update` PARTNER_REMOVED (API link lost).
+3. **Hosting decision** (always-on machine or small VPS) and go-live. Must be live
+   before phase 5 of the Meta runbook.
+4. **LLM quota before go-live**: Gemini free-tier limits are per model per day
    (Flash: ~20 requests/day, used up by one test run; Flash-Lite handled two full
    runs of ~100 requests each). One customer message is 2–4 requests. Check the
    real Flash-Lite daily limit at https://ai.dev/rate-limit, then decide: enable
    billing on the key, or move to Claude Haiku.
+
+## Meta setup runbook (written Nov 2026)
+- `docs/META_SETUP.md`, checked against Meta's developer docs (Nov 2026): routes,
+  phases 0–8, templates `owner_alert` / `customer_update`, System User token, costs.
+- Meta facts that shaped it: coexistence needs Embedded Signup (Tech Provider or
+  Solution Partner); 20 msg/s; no WhatsApp for Windows; phone must open WhatsApp every
+  ~14 days; contacts/history sync within 24 h; since 1 Oct 2026 bot replies are free
+  only for the first 1,000 a month per number.
+- Graph API default moved from v21.0 to v27.0 (workflows regenerated).
 
 ## WF1 end-to-end test (done Nov 2026)
 - `docs/E2E.md`: real Postgres + API + n8n 2.46.6 (`docker-compose.e2e.yml`), Graph API

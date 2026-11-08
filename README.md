@@ -46,6 +46,11 @@ These cover pricing, service areas, holds and expiry, the parallel
 double-booking race, the shared controller stock, cancellations, reschedules,
 owner commands, reminder jobs and the digest.
 
+## Connecting WhatsApp
+
+Step-by-step Meta setup (keeps the WhatsApp Business app working on the same number):
+[`docs/META_SETUP.md`](docs/META_SETUP.md).
+
 ## End-to-end test of the WhatsApp workflow
 
 n8n + API + Postgres with a mock Graph API: see [`docs/E2E.md`](docs/E2E.md).

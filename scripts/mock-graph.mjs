@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // A stand-in for Meta's Graph API, for testing the n8n workflows without
-// WhatsApp. Point n8n at it with GRAPH_API_BASE=http://localhost:4010/v21.0.
+// WhatsApp. Point n8n at it with GRAPH_API_BASE=http://localhost:4010/v27.0.
 //
 //   node scripts/mock-graph.mjs            # listens on MOCK_GRAPH_PORT or 4010
 //

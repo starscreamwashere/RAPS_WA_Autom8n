@@ -13,7 +13,7 @@ services:
 
   n8n:
     environment:
-      GRAPH_API_BASE: http://mock-graph:4010/v21.0
+      GRAPH_API_BASE: http://mock-graph:4010/v27.0
       WA_ACCESS_TOKEN: mock-token
       WA_PHONE_NUMBER_ID: "1234567890"
     volumes: !override

@@ -138,7 +138,7 @@
       ],
       "parameters": {
         "method": "POST",
-        "url": "={{ ($env.GRAPH_API_BASE || \"https://graph.facebook.com/v21.0\") + \"/\" + String($env.WA_PHONE_NUMBER_ID).trim() + \"/messages\" }}",
+        "url": "={{ ($env.GRAPH_API_BASE || \"https://graph.facebook.com/v27.0\") + \"/\" + String($env.WA_PHONE_NUMBER_ID).trim() + \"/messages\" }}",
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [
@@ -385,7 +385,7 @@
       ],
       "parameters": {
         "method": "POST",
-        "url": "={{ ($env.GRAPH_API_BASE || \"https://graph.facebook.com/v21.0\") + \"/\" + String($env.WA_PHONE_NUMBER_ID).trim() + \"/messages\" }}",
+        "url": "={{ ($env.GRAPH_API_BASE || \"https://graph.facebook.com/v27.0\") + \"/\" + String($env.WA_PHONE_NUMBER_ID).trim() + \"/messages\" }}",
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [
@@ -457,7 +457,7 @@
       ],
       "parameters": {
         "method": "POST",
-        "url": "={{ ($env.GRAPH_API_BASE || \"https://graph.facebook.com/v21.0\") + \"/\" + String($env.WA_PHONE_NUMBER_ID).trim() + \"/messages\" }}",
+        "url": "={{ ($env.GRAPH_API_BASE || \"https://graph.facebook.com/v27.0\") + \"/\" + String($env.WA_PHONE_NUMBER_ID).trim() + \"/messages\" }}",
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [
