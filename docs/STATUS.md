@@ -19,11 +19,23 @@ Updated each working session so a new session can pick up the thread.
    before phase 5 of the Meta runbook.
 2. **Meta onboarding (owner + dev)**: `docs/META_SETUP.md`. Owner's first step: phase 0
    checks (who manages the number today, app version, no WhatsApp for Windows).
-3. **LLM quota before go-live**: Gemini free-tier limits are per model per day
-   (Flash: ~20 requests/day, used up by one test run; Flash-Lite handled two full
-   runs of ~100 requests each). One customer message is 2–4 requests. Check the
-   real Flash-Lite daily limit at https://ai.dev/rate-limit, then decide: enable
-   billing on the key, or move to Claude Haiku.
+3. **Owner's card**: Oracle sign-up, and WhatsApp template messages (reminders,
+   review asks outside the 24 h window), need a Visa/Mastercard. Without one: go live
+   on the laptop setup while he gets a virtual card from his bank's app.
+
+## Gemini quota (decided Nov 2026)
+- **Free tier at launch**, billing when needed. Measured: ~3.3 Gemini requests and
+  ~20k input tokens per customer message (prompt + tools ≈ 6k tokens per request).
+  Free limit ≈ 500 requests/day per model (third-party figure; check ai.dev/rate-limit),
+  main + fallback ≈ 300 customer messages/day. Paid: ~₹0.40 per customer message.
+- Signal to upgrade: the nightly digest says "the AI could not answer N times" (each
+  time the customer got a holding reply and the owner an urgent handoff).
+- Tell the owner: on the free tier Google may use the API data to improve its
+  products; on the paid tier it does not.
+- Prompt fixes from this round of testing: the bot offers a hold and waits for the
+  customer's yes (it once held a slot unasked); it only says "the team knows" after
+  a tool told them (it once promised a callback on a paid cancellation without
+  creating the handoff). 18/18 on both models after the fixes.
 
 ## Hosting (decided Nov 2026)
 - Owner pays nothing: **Oracle Cloud Always Free** (ARM, 2 OCPU / 12 GB used of the
